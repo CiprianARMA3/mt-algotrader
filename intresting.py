@@ -65,7 +65,7 @@ class Config:
     MAX_RISK_PER_TRADE = 100  # Maximum $ risk per trade (failsafe)
     
     # Signal Quality Thresholds
-    MIN_CONFIDENCE = 0.78  # 78% minimum model confidence
+    MIN_CONFIDENCE = 0.70  # 78% minimum model confidence
     MIN_ENSEMBLE_AGREEMENT = 0.85  # 85% model agreement (increased precision)
     
     # Position Limits
@@ -2377,8 +2377,15 @@ class ProfessionalFeatureEngine:
         df['co_ratio'] = (df['close'] - df['open']) / df['open']
         df['hlc3'] = (df['high'] + df['low'] + df['close']) / 3
         
-        # Moving averages
-        for period in [5, 10, 20, 50, 100]:
+        # ==========================================
+        # POINT 1: Technical indicator periods using Config
+        # ==========================================
+        # Moving averages using Config values
+        ma_periods = [Config.FAST_MA, Config.MEDIUM_MA, Config.SLOW_MA]
+        if hasattr(Config, 'TREND_MA') and Config.TREND_MA:
+            ma_periods.append(Config.TREND_MA)
+            
+        for period in ma_periods:
             df[f'sma_{period}'] = df['close'].rolling(period).mean()
             df[f'ema_{period}'] = df['close'].ewm(span=period, adjust=False).mean()
             df[f'price_to_sma_{period}'] = df['close'] / df[f'sma_{period}'].replace(0, 1) - 1
@@ -2408,7 +2415,7 @@ class ProfessionalFeatureEngine:
         df['realized_volatility_20'] = df['returns'].rolling(20).std() * np.sqrt(252)
         df['volatility_ratio'] = df['realized_volatility_5'] / df['realized_volatility_20'].replace(0, 1)
         
-        # RSI
+        # RSI using Config.RSI_PERIOD
         try:
             delta = df['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(Config.RSI_PERIOD).mean()
@@ -2420,7 +2427,7 @@ class ProfessionalFeatureEngine:
             df['rsi'] = 50
             df['rsi_normalized'] = 0
         
-        # MACD
+        # MACD (standard periods for MACD)
         try:
             ema_12 = df['close'].ewm(span=12, adjust=False).mean()
             ema_26 = df['close'].ewm(span=26, adjust=False).mean()
@@ -2432,22 +2439,55 @@ class ProfessionalFeatureEngine:
             df['macd_signal'] = 0
             df['macd_hist'] = 0
         
-        # Bollinger Bands
+        # ==========================================
+        # POINT 2: Bollinger Bands using Config.BB_PERIOD and Config.BB_STD
+        # ==========================================
         try:
-            sma_20 = df['close'].rolling(20).mean()
-            std_20 = df['close'].rolling(20).std().replace(0, 1)
-            df['bb_upper'] = sma_20 + (std_20 * 2)
-            df['bb_lower'] = sma_20 - (std_20 * 2)
-            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / sma_20.replace(0, 1)
+            # FIXED: Use Config values directly
+            bb_period = Config.BB_PERIOD  # This is 20 from your Config
+            bb_std = Config.BB_STD  # This is 2.0 from your Config
+            
+            sma_bb = df['close'].rolling(bb_period).mean()
+            std_bb = df['close'].rolling(bb_period).std().replace(0, 1)
+            df['bb_upper'] = sma_bb + (std_bb * bb_std)
+            df['bb_lower'] = sma_bb - (std_bb * bb_std)
+            df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / sma_bb.replace(0, 1)
             df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower']).replace(0, 1)
-        except:
+        except Exception as e:
+            # FIXED: Better error handling
+            ProfessionalLogger.log(f"Bollinger Bands calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
             df['bb_upper'] = df['close']
             df['bb_lower'] = df['close']
             df['bb_width'] = 0
             df['bb_position'] = 0.5
         
+        # ADX if configured
+        if hasattr(Config, 'USE_MARKET_REGIME') and Config.USE_MARKET_REGIME:
+            try:
+                # ADX calculation
+                df['plus_dm'] = np.where((df['high'] - df['high'].shift(1)) > (df['low'].shift(1) - df['low']), 
+                                        np.maximum(df['high'] - df['high'].shift(1), 0), 0)
+                df['minus_dm'] = np.where((df['low'].shift(1) - df['low']) > (df['high'] - df['high'].shift(1)), 
+                                         np.maximum(df['low'].shift(1) - df['low'], 0), 0)
+                
+                tr = df['tr'].rolling(Config.ADX_PERIOD).mean()
+                plus_di = 100 * (df['plus_dm'].rolling(Config.ADX_PERIOD).mean() / tr.replace(0, 1))
+                minus_di = 100 * (df['minus_dm'].rolling(Config.ADX_PERIOD).mean() / tr.replace(0, 1))
+                
+                dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1)
+                df['adx'] = dx.rolling(Config.ADX_PERIOD).mean()
+                
+                # Market regime based on ADX
+                df['trend_strength'] = 0  # 0=sideways, 1=trending, 2=strong trend
+                df['trend_strength'] = np.where(df['adx'] > Config.ADX_STRONG_TREND_THRESHOLD, 2,
+                                               np.where(df['adx'] > Config.ADX_TREND_THRESHOLD, 1, 0))
+            except:
+                df['adx'] = 20
+                df['trend_strength'] = 0
+        
         # Momentum indicators
-        for period in [3, 5, 10, 20]:
+        momentum_periods = [3, 5, 10, 20]
+        for period in momentum_periods:
             df[f'momentum_{period}'] = df['close'].pct_change(period)
             shifted_close = df['close'].shift(period).replace(0, 1)
             df[f'roc_{period}'] = (df['close'] - df['close'].shift(period)) / shifted_close
@@ -2468,7 +2508,7 @@ class ProfessionalFeatureEngine:
             df['volume_sma'] = 0
             df['volume_ratio'] = 1
         
-        # Time features
+        # Time features with session awareness
         if 'time' in df.columns:
             try:
                 df['datetime'] = pd.to_datetime(df['time'], unit='s')
@@ -2477,13 +2517,40 @@ class ProfessionalFeatureEngine:
                 df['day_of_month'] = df['datetime'].dt.day
                 df['month'] = df['datetime'].dt.month
                 
+                # Cyclical encoding
                 df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
                 df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
                 df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
                 df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
                 df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
                 df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
+                
+                # Session flags based on Config
+                if Config.SESSION_AWARE_TRADING:
+                    # London session
+                    df['in_london_session'] = ((df['hour'] >= Config.LONDON_OPEN_HOUR) & 
+                                               (df['hour'] < Config.LONDON_CLOSE_HOUR)).astype(int)
+                    # NY session
+                    df['in_ny_session'] = ((df['hour'] >= Config.NY_OPEN_HOUR) & 
+                                           (df['hour'] < Config.NY_CLOSE_HOUR)).astype(int)
+                    # London-NY overlap (most active)
+                    df['in_overlap_session'] = ((df['hour'] >= Config.NY_OPEN_HOUR) & 
+                                                (df['hour'] < Config.LONDON_CLOSE_HOUR)).astype(int)
+                    # Avoid Asian session
+                    df['avoid_asia_session'] = ((df['hour'] >= 0) & (df['hour'] < 7)).astype(int)
+                    
+                    # Good trading hours (combine sessions)
+                    df['good_trading_hours'] = (df['in_london_session'] | df['in_ny_session']).astype(int)
+                    
+                    # Avoid Monday first hour and Friday last hours
+                    if Config.AVOID_MONDAY_FIRST_HOUR:
+                        df['avoid_monday_hour'] = ((df['day_of_week'] == 0) & (df['hour'] < 1)).astype(int)
+                    
+                    if Config.AVOID_FRIDAY_LAST_HOURS:
+                        df['avoid_friday_hours'] = ((df['day_of_week'] == 4) & (df['hour'] >= 20)).astype(int)
+                    
             except:
+                # Default values on error
                 df['hour'] = 12
                 df['day_of_week'] = 2
                 df['month'] = 1
@@ -2493,6 +2560,13 @@ class ProfessionalFeatureEngine:
                 df['day_cos'] = 1
                 df['month_sin'] = 0
                 df['month_cos'] = 1
+                
+                if Config.SESSION_AWARE_TRADING:
+                    df['in_london_session'] = 0
+                    df['in_ny_session'] = 0
+                    df['in_overlap_session'] = 0
+                    df['avoid_asia_session'] = 0
+                    df['good_trading_hours'] = 1
         else:
             df['hour'] = 12
             df['day_of_week'] = 2
@@ -2503,59 +2577,95 @@ class ProfessionalFeatureEngine:
             df['day_cos'] = 1
             df['month_sin'] = 0
             df['month_cos'] = 1
+            
+            if Config.SESSION_AWARE_TRADING:
+                df['in_london_session'] = 0
+                df['in_ny_session'] = 0
+                df['in_overlap_session'] = 0
+                df['avoid_asia_session'] = 0
+                df['good_trading_hours'] = 1
         
-        # Advanced statistical features
+        # Advanced statistical features using Config
         n = len(df)
         
+        # GARCH volatility using Config.GARCH_VOL_PERIOD
         df['garch_volatility'] = 0
         df['garch_vol_ratio'] = 0
-        if n > 100:
+        garch_window = Config.GARCH_VOL_PERIOD  # FIXED: Use Config directly
+        if n > garch_window:
             try:
-                window_returns = df['returns'].iloc[-100:].values
+                window_returns = df['returns'].iloc[-garch_window:].values
                 window_returns = window_returns[~np.isnan(window_returns) & ~np.isinf(window_returns)]
-                if len(window_returns) > 50:
-                    garch_vol = self.stat_analyzer.calculate_garch_volatility(window_returns)
+                if len(window_returns) > garch_window // 2:
+                    garch_vol = self.stat_analyzer.calculate_garch_volatility(
+                        window_returns, 
+                        p=Config.GARCH_P,  # FIXED: Use Config directly
+                        q=Config.GARCH_Q   # FIXED: Use Config directly
+                    )
                     df.loc[df.index[-1], 'garch_volatility'] = garch_vol
                     if df['volatility'].iloc[-1] > 0:
                         df.loc[df.index[-1], 'garch_vol_ratio'] = garch_vol / df['volatility'].iloc[-1]
-            except:
+            except Exception as e:
+                ProfessionalLogger.log(f"GARCH calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
                 pass
         
+        # ==========================================
+        # POINT 3: Hurst exponent thresholds using Config
+        # ==========================================
         df['hurst_exponent'] = 0.5
-        if n > 100:
+        hurst_window = Config.HURST_WINDOW  # FIXED: Use Config directly
+        if n > hurst_window:
             try:
-                window_prices = df['close'].iloc[-100:].values
+                window_prices = df['close'].iloc[-hurst_window:].values
                 hurst = self.stat_analyzer.calculate_hurst_exponent(window_prices)
                 df.loc[df.index[-1], 'hurst_exponent'] = hurst
-            except:
+            except Exception as e:
+                ProfessionalLogger.log(f"Hurst exponent calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
                 pass
         
+        # Market regime encoding using Config thresholds
         df['regime_encoded'] = 0
         if 'hurst_exponent' in df.columns:
             hurst = df['hurst_exponent'].iloc[-1]
-            if hurst > 0.6:
-                df.loc[df.index[-1], 'regime_encoded'] = 2
-            elif hurst < 0.4:
-                df.loc[df.index[-1], 'regime_encoded'] = 1
+            
+            # FIXED: Use Config thresholds directly
+            trending_thresh = Config.HURST_TRENDING_THRESHOLD
+            meanreverting_thresh = Config.HURST_MEANREVERTING_THRESHOLD
+            
+            if hurst > trending_thresh:
+                df.loc[df.index[-1], 'regime_encoded'] = 2  # Trending
+            elif hurst < meanreverting_thresh:
+                df.loc[df.index[-1], 'regime_encoded'] = 1  # Mean-reverting
             else:
-                df.loc[df.index[-1], 'regime_encoded'] = 0
+                df.loc[df.index[-1], 'regime_encoded'] = 0  # Random
         
+        # ==========================================
+        # POINT 4: VaR confidence levels using Config.VAR_CONFIDENCE
+        # ==========================================
         df['var_95'] = 0
         df['cvar_95'] = 0
         df['var_cvar_spread'] = 0
-        if n > 50:
+        var_window = Config.VAR_LOOKBACK  # FIXED: Use Config directly
+        var_confidence = Config.VAR_CONFIDENCE  # FIXED: Use Config directly (0.99 from your Config)
+        if n > var_window:
             try:
-                window_returns = df['returns'].iloc[-50:].values
+                window_returns = df['returns'].iloc[-var_window:].values
                 window_returns = window_returns[~np.isnan(window_returns) & ~np.isinf(window_returns)]
-                if len(window_returns) > 20:
-                    var = np.percentile(window_returns, 5)
-                    bad_returns = window_returns[window_returns <= var]
-                    cvar = np.mean(bad_returns) if len(bad_returns) > 0 else var
+                if len(window_returns) > var_window // 2:
+                    # Calculate VaR at specified confidence
+                    var_percentile = 100 * (1 - var_confidence)  # For 0.99 confidence, this is 1
+                    var = np.percentile(window_returns, var_percentile)
+                    
+                    # Calculate CVaR at specified confidence
+                    cvar_confidence = Config.CVAR_CONFIDENCE  # Use CVaR confidence from Config
+                    cvar_percentile = 100 * (1 - cvar_confidence)
+                    cvar = np.percentile(window_returns, cvar_percentile)
                     
                     df.loc[df.index[-1], 'var_95'] = var
                     df.loc[df.index[-1], 'cvar_95'] = cvar
                     df.loc[df.index[-1], 'var_cvar_spread'] = cvar - var
-            except:
+            except Exception as e:
+                ProfessionalLogger.log(f"VaR/CVaR calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
                 pass
         
         # Support/Resistance features
@@ -2568,13 +2678,34 @@ class ProfessionalFeatureEngine:
             df['distance_to_low_20'] = 0
             df['high_low_range'] = 0
         
+        # Volatility regime
+        if Config.VOLATILITY_SCALING_ENABLED:
+            try:
+                current_vol = df['volatility'].iloc[-1] * np.sqrt(252)  # Annualized
+                
+                # FIXED: Use Config directly
+                high_vol = Config.HIGH_VOL_THRESHOLD
+                normal_vol = Config.NORMAL_VOL_THRESHOLD
+                low_vol = Config.LOW_VOL_THRESHOLD
+                
+                if current_vol > high_vol:
+                    df['volatility_regime'] = 2  # High volatility
+                elif current_vol < low_vol:
+                    df['volatility_regime'] = 0  # Low volatility
+                else:
+                    df['volatility_regime'] = 1  # Normal volatility
+            except:
+                df['volatility_regime'] = 1
+        
         # Z-Score features
-        if n > 50:
+        zscore_window = 50
+        if n > zscore_window:
             last_idx = df.index[-1]
             
+            # RSI Z-score
             try:
-                rsi_mean = df['rsi'].rolling(50).mean().iloc[-1]
-                rsi_std = df['rsi'].rolling(50).std().iloc[-1]
+                rsi_mean = df['rsi'].rolling(zscore_window).mean().iloc[-1]
+                rsi_std = df['rsi'].rolling(zscore_window).std().iloc[-1]
                 if rsi_std > 0:
                     df.loc[last_idx, 'rsi_zscore'] = (df['rsi'].iloc[-1] - rsi_mean) / rsi_std
                 else:
@@ -2582,9 +2713,10 @@ class ProfessionalFeatureEngine:
             except:
                 df.loc[last_idx, 'rsi_zscore'] = 0
             
+            # MACD histogram Z-score
             try:
-                macd_hist_mean = df['macd_hist'].rolling(50).mean().iloc[-1]
-                macd_hist_std = df['macd_hist'].rolling(50).std().iloc[-1]
+                macd_hist_mean = df['macd_hist'].rolling(zscore_window).mean().iloc[-1]
+                macd_hist_std = df['macd_hist'].rolling(zscore_window).std().iloc[-1]
                 if macd_hist_std > 0:
                     df.loc[last_idx, 'macd_hist_zscore'] = (df['macd_hist'].iloc[-1] - macd_hist_mean) / macd_hist_std
                 else:
@@ -2592,45 +2724,17 @@ class ProfessionalFeatureEngine:
             except:
                 df.loc[last_idx, 'macd_hist_zscore'] = 0
             
-            try:
-                bb_width_mean = df['bb_width'].rolling(50).mean().iloc[-1]
-                bb_width_std = df['bb_width'].rolling(50).std().iloc[-1]
-                if bb_width_std > 0:
-                    df.loc[last_idx, 'bb_width_zscore'] = (df['bb_width'].iloc[-1] - bb_width_mean) / bb_width_std
-                else:
-                    df.loc[last_idx, 'bb_width_zscore'] = 0
-            except:
-                df.loc[last_idx, 'bb_width_zscore'] = 0
-            
-            try:
-                momentum_5_mean = df['momentum_5'].rolling(50).mean().iloc[-1]
-                momentum_5_std = df['momentum_5'].rolling(50).std().iloc[-1]
-                if momentum_5_std > 0:
-                    df.loc[last_idx, 'momentum_5_zscore'] = (df['momentum_5'].iloc[-1] - momentum_5_mean) / momentum_5_std
-                else:
-                    df.loc[last_idx, 'momentum_5_zscore'] = 0
-            except:
-                df.loc[last_idx, 'momentum_5_zscore'] = 0
-            
-            try:
-                recent_returns = df['returns'].iloc[-50:].values
-                if len(recent_returns) > 10:
-                    corr = np.corrcoef(recent_returns[:-1], recent_returns[1:])[0, 1]
-                    df.loc[last_idx, 'returns_autocorr_1'] = 0 if np.isnan(corr) else corr
-                else:
-                    df.loc[last_idx, 'returns_autocorr_1'] = 0
-            except:
-                df.loc[last_idx, 'returns_autocorr_1'] = 0
-            
+            # Volume Z-score if available
             if 'tick_volume' in df.columns:
                 try:
-                    volume_mean = df['tick_volume'].rolling(20).mean().iloc[-1]
-                    volume_std = df['tick_volume'].rolling(20).std().iloc[-1]
+                    volume_mean = df['tick_volume'].rolling(zscore_window).mean().iloc[-1]
+                    volume_std = df['tick_volume'].rolling(zscore_window).std().iloc[-1]
                     if volume_std > 0:
                         df.loc[last_idx, 'volume_zscore'] = (df['tick_volume'].iloc[-1] - volume_mean) / volume_std
                     else:
                         df.loc[last_idx, 'volume_zscore'] = 0
                     
+                    # Volume-price correlation
                     vol_ratio_window = df['volume_ratio'].iloc[-20:]
                     returns_window = df['returns'].iloc[-20:]
                     if len(vol_ratio_window) > 10 and len(returns_window) > 10:
@@ -2644,6 +2748,16 @@ class ProfessionalFeatureEngine:
                     df.loc[last_idx, 'volume_zscore'] = 0
                     df.loc[last_idx, 'volume_price_correlation'] = 0
                     df.loc[last_idx, 'volume_spike'] = 0
+        
+        # Gold-specific features
+        if hasattr(Config, 'GOLD_VOLATILITY_ADJUSTMENT') and Config.GOLD_VOLATILITY_ADJUSTMENT:
+            try:
+                # Calculate normalized ATR based on expected daily range
+                expected_range = Config.EXPECTED_DAILY_RANGE
+                current_atr_percent = df['atr_percent'].iloc[-1] * 100  # Convert to percentage
+                df['gold_atr_normalized'] = current_atr_percent / (expected_range / df['close'].iloc[-1] * 100)
+            except:
+                df['gold_atr_normalized'] = 1
         
         # Final cleanup
         all_features = self.get_feature_columns()
@@ -2662,37 +2776,68 @@ class ProfessionalFeatureEngine:
         """Create labels using advanced methods"""
         df = df.copy()
         
-        if method == 'triple_barrier':
+        # ==========================================
+        # POINT 5: Triple barrier labeling using Config
+        # ==========================================
+        # Use triple barrier if configured
+        if hasattr(Config, 'TRIPLE_BARRIER_METHOD') and Config.TRIPLE_BARRIER_METHOD:
             returns = df['returns'].values
             labels = np.zeros(len(df))
             
-            for i in range(len(df) - forward_bars):
-                if i + forward_bars >= len(df):
+            # FIXED: Use Config values directly
+            upper_barrier = Config.BARRIER_UPPER  # 0.0015 from your Config
+            lower_barrier = Config.BARRIER_LOWER  # -0.0008 from your Config
+            barrier_time = Config.BARRIER_TIME    # 10 from your Config
+            
+            # IMPORTANT FIX: Use min(barrier_time, forward_bars) to avoid index errors
+            max_lookahead = min(barrier_time, forward_bars, len(df) - 1)
+            
+            for i in range(len(df) - max_lookahead):
+                if i + max_lookahead >= len(df):
                     continue
                 
-                future_returns = np.cumprod(1 + returns[i+1:i+forward_bars+1]) - 1
+                # Calculate cumulative returns over the lookahead period
+                future_returns = np.cumprod(1 + returns[i+1:i+max_lookahead+1]) - 1
                 
-                upper_barrier = 0.02
-                lower_barrier = -0.01
+                # Check if upper or lower barrier is hit
+                upper_hit = np.any(future_returns >= upper_barrier)
+                lower_hit = np.any(future_returns <= lower_barrier)
                 
-                if np.any(future_returns >= upper_barrier):
-                    labels[i] = 1
-                elif np.any(future_returns <= lower_barrier):
-                    labels[i] = 0
+                if upper_hit and lower_hit:
+                    # Both hit (unlikely), check which happens first
+                    upper_idx = np.where(future_returns >= upper_barrier)[0]
+                    lower_idx = np.where(future_returns <= lower_barrier)[0]
+                    if upper_idx[0] < lower_idx[0]:
+                        labels[i] = 1  # Upper hit first
+                    else:
+                        labels[i] = 0  # Lower hit first
+                elif upper_hit:
+                    labels[i] = 1  # Take profit hit
+                elif lower_hit:
+                    labels[i] = 0  # Stop loss hit
                 else:
-                    labels[i] = 0 if future_returns[-1] < 0 else 1
+                    # Neither hit, decide based on final return
+                    labels[i] = 1 if future_returns[-1] > 0 else 0
+            
+            df['label'] = labels[:len(df)]
         
         else:
+            # Simple labeling (fallback)
             df['forward_return'] = df['close'].shift(-forward_bars) / df['close'] - 1
             volatility = df['returns'].rolling(20).std().fillna(0.001)
-            dynamic_threshold = 0.002 * (1 + volatility * 10)
+            
+            # Use dynamic threshold or fixed from Config
+            if hasattr(Config, 'USE_DYNAMIC_SL_TP') and Config.USE_DYNAMIC_SL_TP:
+                # ATR-based dynamic threshold
+                atr_percent = df['atr_percent'].rolling(20).mean().fillna(0.001)
+                dynamic_threshold = atr_percent * Config.ATR_SL_MULTIPLIER
+            else:
+                # Fixed threshold from Config
+                dynamic_threshold = Config.FIXED_SL_PERCENT
             
             df['label'] = 0
             df.loc[df['forward_return'] > dynamic_threshold, 'label'] = 1
             df.loc[df['forward_return'] < -dynamic_threshold, 'label'] = 0
-        
-        if 'label' not in df.columns:
-            df['label'] = labels
         
         df = df.dropna(subset=['label'])
         df['label'] = df['label'].astype(int)
@@ -2701,10 +2846,11 @@ class ProfessionalFeatureEngine:
     
     def get_feature_columns(self):
         """Return complete list of feature columns"""
-        return [
+        base_features = [
             'returns', 'log_returns', 'hl_ratio', 'co_ratio', 'hlc3',
-            'price_to_sma_5', 'price_to_sma_10', 'price_to_sma_20', 'price_to_sma_50',
-            'price_deviation_20_z',
+            f'price_to_sma_{Config.FAST_MA}', f'price_to_sma_{Config.MEDIUM_MA}', 
+            f'price_to_sma_{Config.SLOW_MA}',
+            f'price_deviation_{Config.MEDIUM_MA}_z',
             'atr_percent', 'volatility', 'realized_volatility_5', 'realized_volatility_20', 'volatility_ratio',
             'rsi_normalized', 'rsi_zscore',
             'macd_hist', 'macd_hist_zscore',
@@ -2718,7 +2864,31 @@ class ProfessionalFeatureEngine:
             'hurst_exponent', 'regime_encoded',
             'var_95', 'cvar_95', 'var_cvar_spread'
         ]
-
+        
+        # Add session features if enabled
+        if Config.SESSION_AWARE_TRADING:
+            base_features.extend([
+                'in_london_session', 'in_ny_session', 'in_overlap_session',
+                'avoid_asia_session', 'good_trading_hours'
+            ])
+            if Config.AVOID_MONDAY_FIRST_HOUR:
+                base_features.append('avoid_monday_hour')
+            if Config.AVOID_FRIDAY_LAST_HOURS:
+                base_features.append('avoid_friday_hours')
+        
+        # Add ADX features if enabled
+        if hasattr(Config, 'USE_MARKET_REGIME') and Config.USE_MARKET_REGIME:
+            base_features.extend(['adx', 'trend_strength'])
+        
+        # Add volatility regime if enabled
+        if Config.VOLATILITY_SCALING_ENABLED:
+            base_features.append('volatility_regime')
+        
+        # Add gold-specific features
+        if hasattr(Config, 'GOLD_VOLATILITY_ADJUSTMENT') and Config.GOLD_VOLATILITY_ADJUSTMENT:
+            base_features.append('gold_atr_normalized')
+        
+        return base_features
 
 def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, comment=""):
     """Execute trade with SL/TP validation"""
@@ -3176,9 +3346,17 @@ def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, 
         
         ProfessionalLogger.log("=" * 70, "PERFORMANCE", "ENGINE")
 
+
+# ==========================================
+# HE
+# ==========================================
+
+
 # ==========================================
 # SIMPLIFIED COMPONENTS FOR MT5-ONLY OPERATION
 # ==========================================
+
+
 
 class SmartOrderExecutor:
     """Intelligent order execution"""
@@ -3194,18 +3372,15 @@ class SmartOrderExecutor:
             ProfessionalLogger.log(f"Symbol {symbol} not found", "ERROR", "EXECUTOR")
             return None
         
-        # Validate volume
-        if hasattr(symbol_info, 'volume_min') and volume < symbol_info.volume_min:
-            volume = symbol_info.volume_min
+        # Validate volume using Config
+        min_volume = getattr(Config, 'MIN_VOLUME', 0.05)
+        max_volume = getattr(Config, 'MAX_VOLUME', 0.20)
+        volume_step = getattr(Config, 'VOLUME_STEP', 0.01)
         
-        if hasattr(symbol_info, 'volume_max') and volume > symbol_info.volume_max:
-            volume = symbol_info.volume_max
+        volume = max(min_volume, min(volume, max_volume))
+        volume = round(volume / volume_step) * volume_step
         
-        if hasattr(symbol_info, 'volume_step'):
-            step = symbol_info.volume_step
-            volume = round(volume / step) * step
-        
-        # Validate SL/TP Levels
+        # Validate SL/TP Levels using Config
         tick = mt5.symbol_info_tick(symbol)
         if not tick:
             ProfessionalLogger.log(f"Cannot get tick data for {symbol}", "ERROR", "EXECUTOR")
@@ -3215,25 +3390,54 @@ class SmartOrderExecutor:
         point = symbol_info.point if hasattr(symbol_info, 'point') else 0.01
         digits = symbol_info.digits if hasattr(symbol_info, 'digits') else 2
         
-        # Check if SL/TP are valid distances
-        min_distance = 10 * point
+        # Use Config distances
+        min_sl_points = getattr(Config, 'MIN_SL_DISTANCE_POINTS', 50)
+        max_sl_points = getattr(Config, 'MAX_SL_DISTANCE_POINTS', 300)
+        min_tp_points = getattr(Config, 'MIN_TP_DISTANCE_POINTS', 100)
+        max_tp_points = getattr(Config, 'MAX_TP_DISTANCE_POINTS', 600)
         
+        # Validate SL/TP distances
         if order_type == mt5.ORDER_TYPE_BUY:
-            if sl >= current_price - min_distance:
-                ProfessionalLogger.log(f"SL too close to entry, adjusting", "WARNING", "EXECUTOR")
-                sl = current_price - (20 * point)
+            sl_distance = current_price - sl
+            tp_distance = tp - current_price
             
-            if tp <= current_price + min_distance:
-                ProfessionalLogger.log(f"TP too close to entry, adjusting", "WARNING", "EXECUTOR")
-                tp = current_price + (30 * point)
+            # Ensure minimum distances
+            if sl_distance < min_sl_points * point:
+                sl = current_price - (min_sl_points * point)
+                ProfessionalLogger.log(f"SL adjusted to minimum distance", "WARNING", "EXECUTOR")
+            
+            if tp_distance < min_tp_points * point:
+                tp = current_price + (min_tp_points * point)
+                ProfessionalLogger.log(f"TP adjusted to minimum distance", "WARNING", "EXECUTOR")
+            
+            # Ensure risk/reward ratio
+            risk_reward_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+            min_rr = getattr(Config, 'MIN_RR_RATIO', 2.0)
+            
+            if risk_reward_ratio < min_rr and sl_distance > 0:
+                tp = current_price + (sl_distance * min_rr)
+                ProfessionalLogger.log(f"TP adjusted to maintain {min_rr}:1 R:R ratio", "WARNING", "EXECUTOR")
+                
         else:  # SELL order
-            if sl <= current_price + min_distance:
-                ProfessionalLogger.log(f"SL too close to entry, adjusting", "WARNING", "EXECUTOR")
-                sl = current_price + (20 * point)
+            sl_distance = sl - current_price
+            tp_distance = current_price - tp
             
-            if tp >= current_price - min_distance:
-                ProfessionalLogger.log(f"TP too close to entry, adjusting", "WARNING", "EXECUTOR")
-                tp = current_price - (30 * point)
+            # Ensure minimum distances
+            if sl_distance < min_sl_points * point:
+                sl = current_price + (min_sl_points * point)
+                ProfessionalLogger.log(f"SL adjusted to minimum distance", "WARNING", "EXECUTOR")
+            
+            if tp_distance < min_tp_points * point:
+                tp = current_price - (min_tp_points * point)
+                ProfessionalLogger.log(f"TP adjusted to minimum distance", "WARNING", "EXECUTOR")
+            
+            # Ensure risk/reward ratio
+            risk_reward_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+            min_rr = getattr(Config, 'MIN_RR_RATIO', 2.0)
+            
+            if risk_reward_ratio < min_rr and sl_distance > 0:
+                tp = current_price - (sl_distance * min_rr)
+                ProfessionalLogger.log(f"TP adjusted to maintain {min_rr}:1 R:R ratio", "WARNING", "EXECUTOR")
         
         # Prepare order request
         request = {
@@ -3251,16 +3455,35 @@ class SmartOrderExecutor:
         }
         
         ProfessionalLogger.log(f"Order: {symbol} {volume} lots at {current_price:.{digits}f}", "DEBUG", "EXECUTOR")
-        ProfessionalLogger.log(f"  SL: {sl:.{digits}f} | TP: {tp:.{digits}f}", "DEBUG", "EXECUTOR")
+        ProfessionalLogger.log(f"  SL: {sl:.{digits}f} | TP: {tp:.{digits}f} | R:R: {risk_reward_ratio:.2f}:1", "DEBUG", "EXECUTOR")
         
-        result = mt5.order_send(request)
+        # Check spread before entry if configured
+        if hasattr(Config, 'CHECK_SPREAD_BEFORE_ENTRY') and Config.CHECK_SPREAD_BEFORE_ENTRY:
+            spread = tick.ask - tick.bid
+            max_spread = getattr(Config, 'MAX_SPREAD_POINTS', 5) * point
+            if spread > max_spread:
+                ProfessionalLogger.log(f"Spread too high: {spread/point:.1f} points > {max_spread/point:.1f}", "WARNING", "EXECUTOR")
+                return None
         
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            ProfessionalLogger.log(f"Order failed: {result.retcode} - {result.comment}", "ERROR", "EXECUTOR")
-        else:
-            ProfessionalLogger.log(f"✅ Order executed successfully | Ticket: {result.order}", "SUCCESS", "EXECUTOR")
+        # Execute with retries if configured
+        max_retries = getattr(Config, 'MAX_RETRIES', 3)
+        retry_delay = getattr(Config, 'RETRY_DELAY_MS', 500) / 1000
         
-        return result
+        for attempt in range(max_retries):
+            result = mt5.order_send(request)
+            
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                ProfessionalLogger.log(f"✅ Order executed successfully | Ticket: {result.order}", "SUCCESS", "EXECUTOR")
+                return result
+            else:
+                if attempt < max_retries - 1:
+                    ProfessionalLogger.log(f"Order attempt {attempt+1} failed: {result.retcode}, retrying...", "WARNING", "EXECUTOR")
+                    time.sleep(retry_delay)
+                else:
+                    ProfessionalLogger.log(f"Order failed after {max_retries} attempts: {result.retcode} - {result.comment}", "ERROR", "EXECUTOR")
+        
+        return None
+
 
 class ProfessionalTradeMemory:
     """Trade memory system"""
