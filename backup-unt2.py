@@ -54,8 +54,8 @@ class Config:
     TIMEFRAME = mt5.TIMEFRAME_M15  # 15-min optimal for intraday gold trading
     
     # XAUUSD-specific: Gold typically trades in 0.01 lot increments
-    BASE_VOLUME = 0.05  # START SMALL - critical for risk management
-    MAX_VOLUME = 0.30   # Maximum position size cap
+    BASE_VOLUME = 0.01  # START SMALL - critical for risk management
+    MAX_VOLUME = 0.20   # Maximum position size cap
     MIN_VOLUME = 0.05   # MT5 minimum for gold
     VOLUME_STEP = 0.01  # Standard gold lot increment
     
@@ -98,17 +98,17 @@ class Config:
     # ==========================================
     
     # Data Collection
-    LOOKBACK_BARS = 65000  # 8000 bars for stable statistics 
-    TRAINING_MIN_SAMPLES = 6000  # Minimum samples for reliable training
+    LOOKBACK_BARS = 8000  # 8000 bars for stable statistics (was 10k - too slow)
+    TRAINING_MIN_SAMPLES = 2000  # Minimum samples for reliable training
     VALIDATION_SPLIT = 0.20  # 20% validation set
     
     # Retraining Schedule
-    RETRAIN_HOURS = 24  # Retrain every 4 hours (was 3 - too frequent)
+    RETRAIN_HOURS = 4  # Retrain every 4 hours (was 3 - too frequent)
     RETRAIN_ON_PERFORMANCE_DROP = True  # Retrain if performance degrades
     MIN_ACCURACY_THRESHOLD = 0.58  # Retrain if accuracy drops below 58%
     
     # Walk-Forward Optimization
-    WALK_FORWARD_WINDOW = 1000  # 500 bars per window
+    WALK_FORWARD_WINDOW = 500  # 500 bars per window
     WALK_FORWARD_STEP = 100  # 100 bar step (80% overlap)
     WALK_FORWARD_FOLDS = 5  # 5-fold cross-validation
     
@@ -1948,119 +1948,113 @@ class ProfessionalEnsemble:
         ProfessionalLogger.log("=" * 60, "STATISTICS", "ENSEMBLE")
     
     def train(self, data):
-            """Train ensemble with Walk-Forward Optimization (WFO) logic"""
-            try:
-                ProfessionalLogger.log(f"Starting training on {len(data) if data is not None else 0} samples...", "LEARN", "ENSEMBLE")
-                
-                if data is None or len(data) < Config.TRAINING_MIN_SAMPLES:
-                    ProfessionalLogger.log(f"Insufficient data: {len(data) if data is not None else 0} < {Config.TRAINING_MIN_SAMPLES}", "ERROR", "ENSEMBLE")
-                    return False
-                
-                # Perform statistical analysis
-                self.statistical_analysis = self.perform_statistical_analysis(data)
-                
-                # Check data quality
-                quality_score, quality_diagnostics = self.data_quality_checker.check_data_quality(data)
-                if quality_score < Config.MIN_DATA_QUALITY_SCORE:
-                    ProfessionalLogger.log(f"Data quality warning: {quality_score:.2%}", "WARNING", "ENSEMBLE")
-                
-                # Prepare training data
-                X, y = self._prepare_training_data(data)
-                if X is None or len(X) < Config.TRAINING_MIN_SAMPLES:
-                    ProfessionalLogger.log("Insufficient data after preprocessing", "ERROR", "ENSEMBLE")
-                    return False
-                
-                # Scale features
-                X_scaled = self.scaler.fit_transform(X)
-                
-                # ==========================================
-                # UPDATED: Walk-Forward Validation Logic
-                # ==========================================
-                # We use max_train_size to enforce the "Rolling Window" concept 
-                # defined by WALK_FORWARD_WINDOW
-                tscv = TimeSeriesSplit(
-                    n_splits=Config.WALK_FORWARD_FOLDS, 
-                    max_train_size=Config.WALK_FORWARD_WINDOW,
-                    gap=0 # Optional: Add gap if you want to simulate deployment delay
-                )
-                
-                cv_scores = []
-                
-                ProfessionalLogger.log(f"Executing Walk-Forward Validation ({Config.WALK_FORWARD_FOLDS} folds)...", "LEARN", "ENSEMBLE")
-
-                for fold, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
-                    # Enforce minimum training size for the fold
-                    if len(train_idx) < 100: 
-                        continue
-
-                    X_train, X_val = X_scaled[train_idx], X_scaled[val_idx]
-                    y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-                    
-                    # Fit the ensemble on this specific window
-                    self.ensemble.fit(X_train, y_train)
-                    
-                    # Evaluate
-                    val_score = self.ensemble.score(X_val, y_val)
-                    cv_scores.append(val_score)
-                    
-                    ProfessionalLogger.log(f"  Fold {fold+1}/{Config.WALK_FORWARD_FOLDS}: Window Size={len(train_idx)} | Val Acc={val_score:.2%}", 
-                                        "LEARN", "ENSEMBLE")
-                
-                avg_score = np.mean(cv_scores) if cv_scores else 0
-                
-                # Check if model meets minimum requirements
-                if avg_score < Config.MIN_ACCURACY_THRESHOLD:
-                    ProfessionalLogger.log(f"Model failed accuracy threshold: {avg_score:.2%} < {Config.MIN_ACCURACY_THRESHOLD:.2%}", "WARNING", "ENSEMBLE")
-                    # We still proceed to fit final model, but warn user
-                
-                # Final training on the most recent window (Config.WALK_FORWARD_WINDOW)
-                # This ensures the model is tuned to the current market regime
-                final_window_size = min(len(X_scaled), Config.WALK_FORWARD_WINDOW * 2) # Use double window for final fit for stability
-                X_final = X_scaled[-final_window_size:]
-                y_final = y.iloc[-final_window_size:]
-                
-                ProfessionalLogger.log(f"Fitting final model on last {len(X_final)} bars...", "LEARN", "ENSEMBLE")
-                self.ensemble.fit(X_final, y_final)
-                
-                # Store fitted base models
-                try:
-                    if hasattr(self.ensemble, 'named_estimators_'):
-                        self.fitted_base_models = self.ensemble.named_estimators_
-                except Exception as e:
-                    ProfessionalLogger.log(f"Could not store base models: {e}", "WARNING", "ENSEMBLE")
-
-                # Update feature importance (using the RF model from the ensemble)
-                for name, model in self.base_models:
-                    if name == 'RF' and hasattr(model, 'feature_importances_'):
-                        # We need to access the fitted RF within the ensemble
-                        try:
-                            fitted_rf = self.ensemble.named_estimators_['RF']
-                            self.feature_importance = dict(zip(X.columns, fitted_rf.feature_importances_))
-                        except:
-                            pass
-                        break
-
-                # Update training state
-                self.is_trained = True
-                self.last_train_time = datetime.now()
-                self.training_metrics = {
-                    'avg_cv_score': avg_score,
-                    'std_cv_score': np.std(cv_scores) if cv_scores else 0,
-                    'samples': len(X),
-                    'features': len(X.columns),
-                    'wfo_window': Config.WALK_FORWARD_WINDOW
-                }
-                
-                ProfessionalLogger.log(f"✅ Training Complete | WFO Accuracy: {avg_score:.2%}", "SUCCESS", "ENSEMBLE")
-                return True
-                
-            except Exception as e:
-                ProfessionalLogger.log(f"Training error: {str(e)}", "ERROR", "ENSEMBLE")
-                import traceback
-                traceback.print_exc()
+        """Train ensemble with statistical analysis"""
+        try:
+            ProfessionalLogger.log("Starting training with advanced analysis...", "LEARN", "ENSEMBLE")
+            
+            if data is None or len(data) < Config.TRAINING_MIN_SAMPLES:
+                ProfessionalLogger.log(f"Insufficient data: {len(data) if data else 0} samples", "ERROR", "ENSEMBLE")
                 return False
-
-
+            
+            # Perform statistical analysis
+            self.statistical_analysis = self.perform_statistical_analysis(data)
+            
+            # Check data quality
+            quality_score, quality_diagnostics = self.data_quality_checker.check_data_quality(data)
+            ProfessionalLogger.log(f"Data Quality Score: {quality_score:.2%}", "DATA", "ENSEMBLE")
+            
+            if quality_score < Config.MIN_DATA_QUALITY_SCORE:
+                ProfessionalLogger.log(f"Data quality below threshold: {quality_score:.2%} < {Config.MIN_DATA_QUALITY_SCORE:.0%}", 
+                                     "WARNING", "ENSEMBLE")
+            
+            # Prepare training data
+            X, y = self._prepare_training_data(data)
+            if X is None or len(X) < 100:
+                ProfessionalLogger.log("Insufficient data after preprocessing", "ERROR", "ENSEMBLE")
+                return False
+            
+            # Scale features
+            X_scaled = self.scaler.fit_transform(X)
+            
+            # Train with time-series cross-validation
+            tscv = TimeSeriesSplit(n_splits=3)
+            cv_scores = []
+            
+            for fold, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
+                X_train, X_val = X_scaled[train_idx], X_scaled[val_idx]
+                y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+                
+                # Train ensemble
+                self.ensemble.fit(X_train, y_train)
+                
+                # Evaluate
+                train_score = self.ensemble.score(X_train, y_train)
+                val_score = self.ensemble.score(X_val, y_val)
+                cv_scores.append(val_score)
+                
+                ProfessionalLogger.log(f"Fold {fold+1}: Train Acc={train_score:.2%}, Val Acc={val_score:.2%}", 
+                                     "LEARN", "ENSEMBLE")
+            
+            # Final training on all data
+            self.ensemble.fit(X_scaled, y)
+            
+            # Store the fitted base models for later use
+            try:
+                if hasattr(self.ensemble, 'named_estimators_'):
+                    self.fitted_base_models = self.ensemble.named_estimators_
+                    ProfessionalLogger.log(f"Stored {len(self.fitted_base_models)} fitted base models", "LEARN", "ENSEMBLE")
+                elif hasattr(self.ensemble, 'estimators_'):
+                    # Create a dictionary of fitted models
+                    self.fitted_base_models = {}
+                    for idx, (name, _) in enumerate(self.base_models):
+                        if idx < len(self.ensemble.estimators_):
+                            self.fitted_base_models[name] = self.ensemble.estimators_[idx]
+                    ProfessionalLogger.log(f"Stored {len(self.fitted_base_models)} fitted base models from estimators_", "LEARN", "ENSEMBLE")
+                else:
+                    ProfessionalLogger.log("Could not access fitted base models", "WARNING", "ENSEMBLE")
+                    self.fitted_base_models = None
+            except Exception as e:
+                ProfessionalLogger.log(f"Could not store fitted models: {str(e)}", "WARNING", "ENSEMBLE")
+                self.fitted_base_models = None
+            
+            # Calculate feature importance from Random Forest
+            for name, model in self.base_models:
+                if name == 'RF' and hasattr(model, 'feature_importances_'):
+                    importances = model.feature_importances_
+                    feature_names = X.columns
+                    self.feature_importance = dict(zip(feature_names, importances))
+                    
+                    # Log top features
+                    top_features = sorted(self.feature_importance.items(), key=lambda x: x[1], reverse=True)[:10]
+                    ProfessionalLogger.log("Top 10 Features by Importance:", "LEARN", "ENSEMBLE")
+                    for feature, importance in top_features:
+                        ProfessionalLogger.log(f"  {feature}: {importance:.4f}", "LEARN", "ENSEMBLE")
+                    break
+            
+            # Update training state
+            self.is_trained = True
+            self.last_train_time = datetime.now()
+            self.training_metrics = {
+                'avg_cv_score': np.mean(cv_scores) if cv_scores else 0,
+                'std_cv_score': np.std(cv_scores) if cv_scores else 0,
+                'samples': len(X),
+                'features': len(X.columns),
+                'class_distribution': dict(y.value_counts(normalize=True))
+            }
+            
+            ProfessionalLogger.log(f"✅ Ensemble training complete | CV Accuracy: {self.training_metrics['avg_cv_score']:.2%} ± {self.training_metrics['std_cv_score']:.2%}", 
+                                 "SUCCESS", "ENSEMBLE")
+            ProfessionalLogger.log(f"  Samples: {self.training_metrics['samples']} | Features: {self.training_metrics['features']}", 
+                                 "SUCCESS", "ENSEMBLE")
+            
+            return True
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Training error: {str(e)}", "ERROR", "ENSEMBLE")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def predict(self, df):
         """Make prediction with statistical validation"""
         if not self.is_trained:
@@ -2876,37 +2870,35 @@ class ProfessionalTradingEngine:
         ProfessionalLogger.log("=" * 70, "PERFORMANCE", "ENGINE")
     
     def train_initial_model(self):
-            """Train initial model with statistical analysis using deep history"""
-            ProfessionalLogger.log(f"Loading deep history ({Config.LOOKBACK_BARS} bars) for initial training...", "INFO", "ENGINE")
+        """Train initial model with statistical analysis"""
+        ProfessionalLogger.log("Loading data for initial training with analysis...", "INFO", "ENGINE")
+        
+        data = self.get_historical_data(bars=3000)
+        
+        if data is not None and len(data) >= Config.TRAINING_MIN_SAMPLES:
+            ProfessionalLogger.log(f"Training on {len(data)} bars with advanced analysis", "LEARN", "ENSEMBLE")
             
-            # FIXED: Use Config.LOOKBACK_BARS instead of hardcoded 3000
-            data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
+            # Perform statistical analysis before training
+            analysis = self.model.perform_statistical_analysis(data)
             
-            if data is not None:
-                data_len = len(data)
-                ProfessionalLogger.log(f"Retrieved {data_len} bars from MT5", "DATA", "ENGINE")
-
-                # Check if we satisfy the training minimums
-                if data_len >= Config.TRAINING_MIN_SAMPLES:
-                    ProfessionalLogger.log(f"Initializing Walk-Forward Optimization (Window: {Config.WALK_FORWARD_WINDOW}, Folds: {Config.WALK_FORWARD_FOLDS})...", "LEARN", "ENSEMBLE")
-                    
-                    # Perform statistical analysis before training
-                    analysis = self.model.perform_statistical_analysis(data)
-                    
-                    # Train model
-                    success = self.model.train(data)
-                    
-                    if success:
-                        metrics = self.model.get_diagnostics()['training_status']['training_metrics']
-                        ProfessionalLogger.log("✅ Initial model training successful", "SUCCESS", "ENGINE")
-                        ProfessionalLogger.log(f"   CV Score: {metrics.get('avg_cv_score', 0):.2%}", "INFO", "ENGINE")
-                    else:
-                        ProfessionalLogger.log("❌ Initial model training failed", "WARNING", "ENGINE")
-                else:
-                    ProfessionalLogger.log(f"❌ Insufficient data: {data_len} < {Config.TRAINING_MIN_SAMPLES} required", "ERROR", "ENGINE")
-            else:
-                ProfessionalLogger.log(f"❌ Failed to retrieve historical data from MT5", "ERROR", "ENGINE")
+            # Train model
+            success = self.model.train(data)
+            
+            if success:
+                ProfessionalLogger.log("✅ Initial model training successful with statistical analysis", "SUCCESS", "ENGINE")
                 
+                # Get model diagnostics
+                diagnostics = self.model.get_diagnostics()
+                if diagnostics:
+                    ProfessionalLogger.log(f"Model trained with {diagnostics['training_status']['training_metrics'].get('samples', 0)} samples", 
+                                         "INFO", "ENGINE")
+                    ProfessionalLogger.log(f"Cross-validation accuracy: {diagnostics['training_status']['training_metrics'].get('avg_cv_score', 0):.2%}", 
+                                         "INFO", "ENGINE")
+            else:
+                ProfessionalLogger.log("❌ Initial model training failed", "WARNING", "ENGINE")
+        else:
+            ProfessionalLogger.log(f"Insufficient data for training: {len(data) if data else 0} bars", "WARNING", "ENGINE")
+    
     def execute_trade(self, signal, confidence, df_current, features, model_details):
         """Execute a trade based on signal"""
         try:
