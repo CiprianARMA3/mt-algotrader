@@ -50,8 +50,8 @@ class Config:
     
     # XAUUSD-specific: Gold typically trades in 0.01 lot increments
     BASE_VOLUME = 0.01  # START SMALL - critical for risk management
-    MAX_VOLUME = 0.10   # Maximum position size cap
-    MIN_VOLUME = 0.01   # MT5 minimum for gold
+    MAX_VOLUME = 0.20   # Maximum position size cap
+    MIN_VOLUME = 0.05   # MT5 minimum for gold
     VOLUME_STEP = 0.01  # Standard gold lot increment
     
     MAGIC_NUMBER = 998877
@@ -391,7 +391,7 @@ class Config:
     VALIDATE_SIGNALS = True  # Double-check signals before execution
     VALIDATE_RISK = True  # Verify risk calculations
     VALIDATE_STOPS = True  # Verify SL/TP distances
-    
+
 # ==========================================
 # PROFESSIONAL LOGGING
 # ==========================================
@@ -1735,6 +1735,7 @@ class ProfessionalEnsemble:
             return True
         
         return False
+
 # ==========================================
 # PROFESSIONAL TRADING ENGINE WITH STATISTICAL ANALYSIS
 # ==========================================
@@ -2355,6 +2356,7 @@ class ProfessionalTradingEngine:
             
             mt5.shutdown()
             ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
+
 # ==========================================
 # ADVANCED FEATURE ENGINEERING WITH STATISTICS
 # ==========================================
