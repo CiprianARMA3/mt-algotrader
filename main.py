@@ -41,8 +41,8 @@ class Config:
     
     # Risk Management
     RISK_PERCENT = 0.02
-    MIN_CONFIDENCE = 0.6
-    MIN_ENSEMBLE_AGREEMENT = 0.67
+    MIN_CONFIDENCE = 0.60
+    MIN_ENSEMBLE_AGREEMENT = 0.60
     MAX_POSITIONS = 2
     MAX_DAILY_LOSS_PERCENT = 5.0
     MAX_CONSECUTIVE_LOSSES = 3
@@ -55,13 +55,13 @@ class Config:
     
     # Dataset Configuration
     USE_HISTORICAL_DATASET = True
-    HISTORICAL_DATA_LIMIT = 5000
+    HISTORICAL_DATA_LIMIT = 15000
     HISTORICAL_WEIGHT = 0.3
     RECENT_WEIGHT = 0.7
     
     # Ensemble Configuration
     USE_STACKING_ENSEMBLE = True
-    MIN_DATA_QUALITY_SCORE = 0.7
+    MIN_DATA_QUALITY_SCORE = 0.6
     
     # Learning Parameters
     TRADE_HISTORY_FILE = "trade_history.json"
