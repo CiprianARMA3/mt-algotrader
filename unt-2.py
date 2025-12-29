@@ -99,7 +99,7 @@ class Config:
     # ==========================================
     
     # Data Collection
-    LOOKBACK_BARS = 65000  # 8000 bars for stable statistics 
+    LOOKBACK_BARS = 6000  # 8000 bars for stable statistics 
     TRAINING_MIN_SAMPLES = 6000  # Minimum samples for reliable training
     VALIDATION_SPLIT = 0.20  # 20% validation set
     
@@ -197,7 +197,7 @@ class Config:
     MIN_SL_DISTANCE_POINTS = 50  # Minimum $0.50 stop loss
     MAX_SL_DISTANCE_POINTS = 300  # Maximum $3.00 stop loss
     MIN_TP_DISTANCE_POINTS = 100  # Minimum $1.00 take profit
-    MAX_TP_DISTANCE_POINTS = 600  # Maximum $6.00 take profit
+    MAX_TP_DISTANCE_POINTS = 1000  # Maximum $6.00 take profit
     
     # Trailing Stop
     USE_TRAILING_STOP = True
