@@ -225,8 +225,8 @@ class Config:
     SESSION_AWARE_TRADING = True
     
     # Trading Sessions (UTC times)
-    AVOID_ASIAN_SESSION = True
-    PREFER_LONDON_NY_OVERLAP = True
+    AVOID_ASIAN_SESSION = False  #true
+    PREFER_LONDON_NY_OVERLAP = False #true
     
     LONDON_OPEN_HOUR = 8
     LONDON_CLOSE_HOUR = 16
@@ -1129,12 +1129,87 @@ class EnhancedFeatureEngine:
         df = self._add_microstructure_features(df)
         
         # Volume features
+        # Volume features - ENHANCED VERSION
         if 'tick_volume' in df.columns:
-            df['volume_sma'] = df['tick_volume'].rolling(20).mean()
-            df['volume_ratio'] = df['tick_volume'] / df['volume_sma'].replace(0, 1)
+            # Multiple volume metrics for robustness
+            volume_window = 20
+            
+            # 1. Basic volume statistics
+            df['volume_sma'] = df['tick_volume'].rolling(volume_window).mean()
+            df['volume_median'] = df['tick_volume'].rolling(volume_window).median()
+            df['volume_std'] = df['tick_volume'].rolling(volume_window).std().replace(0, 1)
+            
+            # 2. Volume ratios using different baselines
+            # Using median (more robust to outliers)
+            df['volume_ratio'] = df['tick_volume'] / df['volume_median'].replace(0, 1)
+            
+            # Using mean (traditional)
+            df['volume_ratio_mean'] = df['tick_volume'] / df['volume_sma'].replace(0, 1)
+            
+            # 3. Volume z-score (statistical significance)
+            df['volume_zscore'] = (df['tick_volume'] - df['volume_sma']) / df['volume_std']
+            
+            # 4. Volume trends (momentum)
+            df['volume_trend_5'] = df['tick_volume'].rolling(5).mean() / df['tick_volume'].rolling(20).mean()
+            df['volume_trend_10'] = df['tick_volume'].rolling(10).mean() / df['tick_volume'].rolling(30).mean()
+            
+            # 5. Volume acceleration (rate of change)
+            df['volume_change'] = df['tick_volume'].pct_change()
+            df['volume_acceleration'] = df['volume_change'].rolling(5).mean()
+            
+            # 6. Volume spikes detection
+            df['volume_spike'] = (df['volume_zscore'] > 2.0).astype(int)
+            df['volume_crash'] = (df['volume_zscore'] < -2.0).astype(int)
+            
+            # 7. Volume vs volatility correlation
+            returns = df['close'].pct_change()
+            df['volume_price_corr_10'] = df['tick_volume'].rolling(10).corr(returns.abs())
+            df['volume_price_corr_20'] = df['tick_volume'].rolling(20).corr(returns.abs())
+            
+            # 8. Relative volume for gold (session-based)
+            if hasattr(df, 'hour'):
+                # Calculate session-specific volume baselines
+                for session_hour in range(0, 24, 6):
+                    session_mask = (df['hour'] >= session_hour) & (df['hour'] < session_hour + 6)
+                    if session_mask.any():
+                        session_volume = df.loc[session_mask, 'tick_volume']
+                        df.loc[session_mask, f'session_volume_avg_{session_hour}'] = session_volume.mean()
+                        df.loc[session_mask, 'volume_session_ratio'] = df['tick_volume'] / df[f'session_volume_avg_{session_hour}'].replace(0, 1)
+            
+            # 9. Volume-based support/resistance detection
+            high_volume_bars = df[df['volume_ratio'] > 2.0]
+            if len(high_volume_bars) > 10:
+                # Calculate support/resistance levels from high volume bars
+                df['high_volume_close'] = high_volume_bars['close'].rolling(5).mean()
+                df['volume_support'] = high_volume_bars['low'].rolling(5).min()
+                df['volume_resistance'] = high_volume_bars['high'].rolling(5).max()
+            
+            # 10. Volume divergence detection
+            price_trend = df['close'].rolling(5).mean().diff()
+            volume_trend = df['tick_volume'].rolling(5).mean().diff()
+            df['volume_divergence'] = (price_trend * volume_trend < 0).astype(int)
+            
         else:
-            df['volume_sma'] = 0
+            # Default values when volume data is unavailable
+            df['volume_sma'] = 1
+            df['volume_median'] = 1
             df['volume_ratio'] = 1
+            df['volume_ratio_mean'] = 1
+            df['volume_zscore'] = 0
+            df['volume_trend_5'] = 1
+            df['volume_trend_10'] = 1
+            df['volume_change'] = 0
+            df['volume_acceleration'] = 0
+            df['volume_spike'] = 0
+            df['volume_crash'] = 0
+            df['volume_price_corr_10'] = 0
+            df['volume_price_corr_20'] = 0
+            df['volume_divergence'] = 0
+
+        # Ensure all volume features are finite
+        volume_columns = [col for col in df.columns if 'volume' in col]
+        for col in volume_columns:
+            df[col] = df[col].replace([np.inf, -np.inf], 0).fillna(0)
         
         # Time features with session awareness
         if 'time' in df.columns:
@@ -1695,76 +1770,389 @@ class EnhancedFeatureEngine:
 # SIGNAL QUALITY FILTER (NEW)
 # ==========================================
 class SignalQualityFilter:
-    """Multi-layer signal validation"""
+    """Multi-layer signal validation with enhanced volume intelligence"""
     
     @staticmethod
     def validate_signal(signal, confidence, features, market_context):
-        """Comprehensive signal validation"""
+        """Comprehensive signal validation with adaptive thresholds"""
         
-        # 1. Confidence threshold (dynamic)
+        validation_results = []
+        
+        # ==========================================
+        # 1. CONFIDENCE THRESHOLD (DYNAMIC)
+        # ==========================================
         base_confidence = Config.MIN_CONFIDENCE
-        if market_context.get('volatility_regime') == 'high':
-            base_confidence *= 1.2
+        
+        # Adjust confidence threshold based on market regime
+        regime = market_context.get('market_regime', 'unknown')
+        if regime == 'volatile':
+            base_confidence *= 1.15
+        elif regime == 'trending':
+            base_confidence *= 1.05
+        elif regime == 'mean_reverting':
+            base_confidence *= 0.95
+        
+        # Adjust for time of day (higher threshold during low liquidity)
+        hour = market_context.get('hour', datetime.now().hour)
+        if 0 <= hour < 7:  # Asian session
+            base_confidence *= 1.1
         
         if confidence < base_confidence:
             return False, f"Low confidence: {confidence:.2%} < {base_confidence:.2%}"
         
-        # 2. RSI extremes filter
+        validation_results.append(f"✓ Confidence: {confidence:.2%} >= {base_confidence:.2%}")
+        
+        # ==========================================
+        # 2. RSI EXTREMES FILTER (WITH REGIME ADJUSTMENT)
+        # ==========================================
         rsi = features.get('rsi_normalized', 0) * 50 + 50
-        if signal == 1 and rsi > 80:
-            return False, f"RSI extremely overbought: {rsi:.1f}"
-        if signal == 0 and rsi < 20:
-            return False, f"RSI extremely oversold: {rsi:.1f}"
         
-        # 3. Spread filter
-        if market_context.get('spread_pips', 0) > Config.MAX_SPREAD_POINTS:
-            return False, "Spread too wide"
+        # Dynamic RSI thresholds based on regime
+        if regime == 'trending':
+            # Allow more extreme RSI in trending markets
+            if signal == 1 and rsi > 85:
+                return False, f"RSI extremely overbought (trending): {rsi:.1f}"
+            if signal == 0 and rsi < 15:
+                return False, f"RSI extremely oversold (trending): {rsi:.1f}"
+        else:
+            # Normal thresholds
+            if signal == 1 and rsi > 80:
+                return False, f"RSI extremely overbought: {rsi:.1f}"
+            if signal == 0 and rsi < 20:
+                return False, f"RSI extremely oversold: {rsi:.1f}"
         
-        # 4. Time-of-day filter
-        hour = market_context.get('hour', 12)
-        if hour < 7 or hour > 20:
-            return False, f"Outside optimal trading hours: {hour}:00"
+        validation_results.append(f"✓ RSI OK: {rsi:.1f}")
         
-        # 5. News event filter
+        # ==========================================
+        # 3. ADVANCED VOLUME VALIDATION (ENHANCED)
+        # ==========================================
+        volume_ratio = features.get('volume_ratio', 1)
+        volume_zscore = features.get('volume_zscore', 0)
+        
+        # Get ATR-based context
+        atr_percent = features.get('atr_percent', 0.001)
+        volatility = features.get('volatility', 0)
+        
+        # Dynamic volume threshold based on multiple factors
+        min_volume_ratio = 0.3  # Base threshold (lowered from 0.5)
+        
+        # Adjust based on market context
+        if regime == 'volatile':
+            min_volume_ratio = 0.4  # Need more volume in volatile markets
+        elif regime == 'trending':
+            min_volume_ratio = 0.25  # Can accept lower volume in strong trends
+        elif 0 <= hour < 7:  # Asian session
+            min_volume_ratio = 0.35  # Lower threshold for low-liquidity hours
+        
+        # Adjust for high volatility (can accept lower volume during news)
+        if volatility > 0.015:
+            min_volume_ratio = max(0.2, min_volume_ratio * 0.8)
+        
+        # Check volume ratio
+        if volume_ratio < min_volume_ratio:
+            # Additional check: if price is at extremes, volume can be lower
+            price_position = features.get('bb_position', 0.5)
+            if not (price_position > 0.8 or price_position < 0.2):
+                # Not at Bollinger Band extremes, so volume matters more
+                return False, f"Insufficient volume: ratio={volume_ratio:.2f}, threshold={min_volume_ratio:.2f}"
+        
+        validation_results.append(f"✓ Volume OK: ratio={volume_ratio:.2f}, z={volume_zscore:.2f}")
+        
+        # ==========================================
+        # 4. SPREAD FILTER (DYNAMIC)
+        # ==========================================
+        spread_pips = market_context.get('spread_pips', 0)
+        max_spread = Config.MAX_SPREAD_POINTS
+        
+        # Dynamic spread adjustment based on volatility
+        if volatility > 0.015:
+            max_spread = int(max_spread * 1.5)  # Allow wider spreads in high volatility
+        
+        if spread_pips > max_spread:
+            return False, f"Spread too wide: {spread_pips} > {max_spread}"
+        
+        validation_results.append(f"✓ Spread OK: {spread_pips} <= {max_spread}")
+        
+        # ==========================================
+        # 5. TIME-OF-DAY FILTER (ENHANCED)
+        # ==========================================
+        if Config.SESSION_AWARE_TRADING:
+            hour = market_context.get('hour', datetime.now().hour)
+            day_of_week = market_context.get('day_of_week', datetime.now().weekday())
+            
+            # Check for market hours
+            if Config.AVOID_ASIAN_SESSION and 0 <= hour < 7:
+                return False, f"Avoiding Asian session: {hour}:00"
+            
+            # Check for overlap preference
+            if Config.PREFER_LONDON_NY_OVERLAP:
+                in_overlap = Config.LONDON_CLOSE_HOUR > hour >= Config.NY_OPEN_HOUR
+                if not in_overlap and confidence < 0.7:
+                    return False, f"Outside preferred overlap hours: {hour}:00"
+            
+            # Monday first hour avoidance
+            if Config.AVOID_MONDAY_FIRST_HOUR and day_of_week == 0 and hour < 1:
+                return False, "Avoiding Monday first hour"
+            
+            # Friday last hours avoidance
+            if Config.AVOID_FRIDAY_LAST_HOURS and day_of_week == 4 and hour >= 20:
+                return False, "Avoiding Friday last hours"
+        
+        validation_results.append(f"✓ Time OK: {hour}:00")
+        
+        # ==========================================
+        # 6. NEWS EVENT FILTER
+        # ==========================================
         if market_context.get('high_impact_news_soon', False):
-            return False, "High-impact news event imminent"
+            # Allow trades if confidence is very high and we're not too close to news
+            if confidence < 0.8:
+                return False, "High-impact news event imminent"
         
-        # 6. Correlation check
+        validation_results.append("✓ No news interference")
+        
+        # ==========================================
+        # 7. CORRELATION CHECK (ENHANCED)
+        # ==========================================
         existing_positions = market_context.get('existing_positions', [])
         if len(existing_positions) > 0:
-            correlation_risk = SignalQualityFilter._check_correlation(signal, existing_positions)
+            correlation_risk = SignalQualityFilter._check_correlation_enhanced(signal, existing_positions, features)
             if correlation_risk > Config.MAX_POSITION_CORRELATION:
                 return False, f"High correlation with existing positions: {correlation_risk:.2f}"
         
-        # 7. Volatility spike filter
-        if market_context.get('vol_surprise', 0) > 3:
-            return False, "Abnormal volatility spike detected"
+        validation_results.append(f"✓ Correlation OK: {len(existing_positions)} existing positions")
         
-        # 8. Volume confirmation
-        volume_ratio = features.get('volume_ratio', 1)
-        if volume_ratio < 0.5:
-            return False, f"Insufficient volume: {volume_ratio:.2f}"
+        # ==========================================
+        # 8. VOLATILITY SPIKE FILTER
+        # ==========================================
+        vol_surprise = market_context.get('vol_surprise', 0)
+        if vol_surprise > 4:  # Increased threshold from 3
+            return False, f"Abnormal volatility spike: {vol_surprise:.1f}"
         
-        # 9. Market regime filter
-        regime = market_context.get('market_regime', 'unknown')
+        validation_results.append(f"✓ Volatility OK: surprise={vol_surprise:.1f}")
+        
+        # ==========================================
+        # 9. MARKET REGIME FILTER
+        # ==========================================
         if regime == 'volatile' and confidence < 0.65:
-            return False, "Volatile regime requires higher confidence"
+            return False, f"Volatile regime requires higher confidence: {confidence:.2%} < 0.65"
         
-        # 10. Multi-timeframe alignment (if available)
+        validation_results.append(f"✓ Regime OK: {regime}")
+        
+        # ==========================================
+        # 10. MULTI-TIMEFRAME ALIGNMENT
+        # ==========================================
         if 'multi_tf_alignment' in market_context:
-            if market_context['multi_tf_alignment'] < 0.6:
-                return False, f"Low multi-TF alignment: {market_context['multi_tf_alignment']:.0%}"
+            alignment = market_context['multi_tf_alignment']
+            min_alignment = Config.TIMEFRAME_ALIGNMENT_THRESHOLD
+            
+            # Adjust alignment threshold based on signal strength
+            if confidence > 0.7:
+                min_alignment *= 0.9  # Lower threshold for high confidence signals
+            
+            if alignment < min_alignment:
+                return False, f"Low multi-TF alignment: {alignment:.0%} < {min_alignment:.0%}"
+            
+            validation_results.append(f"✓ Multi-TF alignment: {alignment:.0%}")
         
-        return True, "All filters passed"
+        # ==========================================
+        # 11. TECHNICAL CONFIRMATION
+        # ==========================================
+        if not SignalQualityFilter._technical_confirmation(signal, features):
+            return False, "Lacking technical confirmation"
+        
+        validation_results.append("✓ Technical confirmation")
+        
+        # ==========================================
+        # 12. PRICE ACTION CONFIRMATION
+        # ==========================================
+        price_action_ok = SignalQualityFilter._price_action_confirmation(signal, features)
+        if not price_action_ok:
+            return False, "Price action not confirming"
+        
+        validation_results.append("✓ Price action confirming")
+        
+        # ==========================================
+        # 13. TREND FILTER (OPTIONAL)
+        # ==========================================
+        if Config.LONG_TIMEFRAME_TREND_FILTER:
+            trend_filter = market_context.get('trend_filter', 1)
+            if trend_filter == -1:
+                return False, "Trend filter blocking trade"
+            validation_results.append("✓ Trend filter passed")
+        
+        # ==========================================
+        # 14. POSITION COUNT CHECK
+        # ==========================================
+        if len(existing_positions) >= Config.MAX_POSITIONS:
+            return False, f"Max positions reached: {len(existing_positions)}/{Config.MAX_POSITIONS}"
+        
+        validation_results.append(f"✓ Position count OK: {len(existing_positions)}/{Config.MAX_POSITIONS}")
+        
+        # ==========================================
+        # 15. RECENT PERFORMANCE CHECK
+        # ==========================================
+        recent_performance = market_context.get('recent_performance', {'win_rate': 0.5})
+        win_rate = recent_performance.get('win_rate', 0.5)
+        
+        # Lower confidence requirements during winning streaks
+        if win_rate < 0.4 and confidence < 0.6:
+            return False, f"Poor recent performance (win rate: {win_rate:.0%}) requires higher confidence"
+        
+        validation_results.append(f"✓ Recent performance OK: win rate={win_rate:.0%}")
+        
+        # Log successful validation
+        if len(validation_results) > 0 and Config.DEBUG_MODE:
+            ProfessionalLogger.log("Signal validation details:", "DEBUG", "FILTER")
+            for result in validation_results:
+                ProfessionalLogger.log(f"  {result}", "DEBUG", "FILTER")
+        
+        return True, f"All filters passed ({len(validation_results)} checks)"
     
     @staticmethod
-    def _check_correlation(new_signal, existing_positions):
-        """Check correlation with existing positions"""
-        same_direction = all(
-            pos['signal'] == new_signal 
-            for pos in existing_positions
-        )
-        return 1.0 if same_direction else 0.0
+    def _check_correlation_enhanced(new_signal, existing_positions, features):
+        """Enhanced correlation check considering market context"""
+        if not existing_positions:
+            return 0.0
+        
+        # Count positions in same direction
+        same_direction = sum(1 for pos in existing_positions if pos.get('signal') == new_signal)
+        
+        # Consider market regime: allow more correlated positions in strong trends
+        trending_strength = features.get('trend_strength', 0)
+        if trending_strength > 2:  # Very strong trend
+            correlation_penalty = 0.3
+        else:
+            correlation_penalty = 1.0
+        
+        return (same_direction / len(existing_positions)) * correlation_penalty
+    
+    @staticmethod
+    def _technical_confirmation(signal, features):
+        """Check for technical indicator confirmation"""
+        
+        # Get key indicators
+        macd_hist = features.get('macd_hist', 0)
+        bb_position = features.get('bb_position', 0.5)
+        momentum = features.get('momentum_5', 0)
+        adx = features.get('adx', 20)
+        
+        # MACD confirmation
+        macd_confirm = (signal == 1 and macd_hist > 0) or (signal == 0 and macd_hist < 0)
+        
+        # Bollinger Band confirmation
+        bb_confirm = False
+        if signal == 1:
+            bb_confirm = bb_position < 0.3  # Near lower band for buys
+        else:
+            bb_confirm = bb_position > 0.7  # Near upper band for sells
+        
+        # Momentum confirmation
+        momentum_confirm = (signal == 1 and momentum > 0) or (signal == 0 and momentum < 0)
+        
+        # ADX confirmation (trend strength)
+        adx_confirm = adx > 20  # Some trend present
+        
+        # Require at least 2 out of 4 confirmations
+        confirmations = [macd_confirm, bb_confirm, momentum_confirm, adx_confirm]
+        confirm_count = sum(1 for c in confirmations if c)
+        
+        return confirm_count >= 2
+    
+    @staticmethod
+    def _price_action_confirmation(signal, features):
+        """Check price action patterns"""
+        
+        # Get price action features
+        bullish_engulfing = features.get('bullish_engulfing', 0)
+        bearish_engulfing = features.get('bearish_engulfing', 0)
+        hammer = features.get('hammer', 0)
+        shooting_star = features.get('shooting_star', 0)
+        higher_high = features.get('higher_high', 0)
+        lower_low = features.get('lower_low', 0)
+        
+        if signal == 1:  # Buy signal
+            # Bullish patterns: hammer, bullish engulfing, higher high
+            bullish_patterns = hammer > 0 or bullish_engulfing > 0 or higher_high > 0
+            bearish_patterns = shooting_star > 0 or bearish_engulfing > 0 or lower_low > 0
+            
+            # Allow if bullish patterns present OR no bearish patterns
+            return bullish_patterns or not bearish_patterns
+        
+        else:  # Sell signal
+            # Bearish patterns: shooting star, bearish engulfing, lower low
+            bearish_patterns = shooting_star > 0 or bearish_engulfing > 0 or lower_low > 0
+            bullish_patterns = hammer > 0 or bullish_engulfing > 0 or higher_high > 0
+            
+            # Allow if bearish patterns present OR no bullish patterns
+            return bearish_patterns or not bullish_patterns
+    
+    @staticmethod
+    def get_validation_summary(signal, confidence, features, market_context):
+        """Get detailed validation summary without blocking"""
+        summary = []
+        
+        # 1. Confidence
+        base_confidence = Config.MIN_CONFIDENCE
+        regime = market_context.get('market_regime', 'unknown')
+        if regime == 'volatile':
+            base_confidence *= 1.15
+        
+        confidence_ok = confidence >= base_confidence
+        summary.append({
+            'check': 'confidence',
+            'passed': confidence_ok,
+            'value': f"{confidence:.2%}",
+            'threshold': f"{base_confidence:.2%}"
+        })
+        
+        # 2. Volume
+        volume_ratio = features.get('volume_ratio', 1)
+        min_volume_ratio = 0.3  # Base threshold
+        if regime == 'volatile':
+            min_volume_ratio = 0.4
+        
+        volume_ok = volume_ratio >= min_volume_ratio
+        summary.append({
+            'check': 'volume',
+            'passed': volume_ok,
+            'value': f"{volume_ratio:.2f}",
+            'threshold': f"{min_volume_ratio:.2f}"
+        })
+        
+        # 3. RSI
+        rsi = features.get('rsi_normalized', 0) * 50 + 50
+        rsi_ok = True
+        if signal == 1 and rsi > 80:
+            rsi_ok = False
+        if signal == 0 and rsi < 20:
+            rsi_ok = False
+        
+        summary.append({
+            'check': 'rsi',
+            'passed': rsi_ok,
+            'value': f"{rsi:.1f}",
+            'threshold': "20-80"
+        })
+        
+        # 4. Technical confirmation
+        tech_confirm = SignalQualityFilter._technical_confirmation(signal, features)
+        summary.append({
+            'check': 'technical_confirmation',
+            'passed': tech_confirm,
+            'value': "N/A",
+            'threshold': "2/4 indicators"
+        })
+        
+        # Count passed checks
+        passed = sum(1 for item in summary if item['passed'])
+        total = len(summary)
+        
+        return {
+            'summary': summary,
+            'passed_count': passed,
+            'total_checks': total,
+            'overall_passed': passed >= 3  # Pass if at least 3 out of 4 basic checks
+        }
 
 # ==========================================
 # SMART ENTRY TIMING (NEW)
@@ -2862,11 +3250,32 @@ class MultiTimeframeAnalyser:
                     analysis['trend_filter'] = -1
                 else:
                     analysis['trend_filter'] = 1
-        
-        alignment_bonus = 1.0 if analysis['alignment_score'] >= self.config.TIMEFRAME_ALIGNMENT_THRESHOLD else 0.5
-        trend_bonus = 1.0 if analysis['trend_filter'] == 1 else 0.3
-        analysis['confidence'] = min(1.0, alignment_bonus * trend_bonus * 0.8)
-        
+                
+        alignment_threshold = self.config.TIMEFRAME_ALIGNMENT_THRESHOLD
+
+        # 1. Gradual alignment bonus (not binary)
+        alignment_score = analysis['alignment_score']
+        if alignment_score >= alignment_threshold:
+            # Above threshold: scale from 0.8 to 1.0
+            alignment_bonus = 0.8 + (alignment_score - alignment_threshold) / (1 - alignment_threshold) * 0.2
+        else:
+            # Below threshold: scale from 0.4 to 0.8
+            alignment_bonus = 0.4 + (alignment_score / alignment_threshold) * 0.4
+
+        # 2. Trend bonus with H1 dominance but not too harsh
+        if analysis['trend_filter'] == 1:
+            trend_bonus = 1.0  # H1 supports trade
+        elif analysis['trend_filter'] == 0:  # Neutral
+            trend_bonus = 0.8  # H1 neutral - moderate penalty (was 0.7)
+        else:  # -1 (opposite)
+            trend_bonus = 0.5  # H1 opposite - stronger penalty but not killer
+
+        # 3. Calculate confidence with market regime adjustment
+        base_confidence = alignment_bonus * trend_bonus * 0.9
+
+        # 4. Apply confidence floor and ceiling
+        analysis['confidence'] = max(0.2, min(0.95, base_confidence))
+
         return analysis
     
     def _generate_timeframe_signal(self, features, timeframe_name):
@@ -3479,131 +3888,312 @@ class EnhancedTradingEngine:
         else:
             ProfessionalLogger.log(f"❌ Failed to retrieve historical data from MT5", "ERROR", "ENGINE")
     
-    def execute_trade(self, signal, confidence, df_current, features, model_details):
-        """Execute a trade based on signal"""
-        try:
-            symbol = Config.SYMBOL
+    def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, comment=""):
+        """
+        Enhanced trade execution with comprehensive validation and volume management.
+        """
+        # 1. Get Symbol Info with validation
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            ProfessionalLogger.log(f"Symbol {symbol} not found", "ERROR", "EXECUTOR")
+            return None
+        
+        if not symbol_info.trade_allowed:
+            ProfessionalLogger.log(f"Trading disabled for {symbol}", "ERROR", "EXECUTOR")
+            return None
+        
+        # 2. Comprehensive Volume Normalization with Config enforcement
+        step = symbol_info.volume_step
+        broker_min_vol = symbol_info.volume_min
+        broker_max_vol = symbol_info.volume_max
+        
+        # Apply Config volume limits (more restrictive of Config vs Broker)
+        min_vol = max(Config.MIN_VOLUME, broker_min_vol)
+        max_vol = min(Config.MAX_VOLUME, broker_max_vol)
+        
+        ProfessionalLogger.log(f"Volume limits: Config [{Config.MIN_VOLUME:.2f}-{Config.MAX_VOLUME:.2f}], "
+                             f"Broker [{broker_min_vol:.2f}-{broker_max_vol:.2f}], "
+                             f"Applied [{min_vol:.2f}-{max_vol:.2f}] | Step: {step}", 
+                             "DEBUG", "EXECUTOR")
+        
+        # Initial step normalization
+        if step > 0:
+            volume = round(volume / step) * step
+        
+        # Enforce volume boundaries with precision handling
+        original_volume = volume
+        volume = max(min_vol, min(volume, max_vol))
+        
+        # Determine decimal precision
+        decimals = 2
+        if step < 0.001: decimals = 4
+        elif step < 0.01: decimals = 3
+        elif step == 1.0: decimals = 0
+        
+        volume = round(volume, decimals)
+        
+        # Log volume adjustments
+        if abs(original_volume - volume) > 0.001:
+            ProfessionalLogger.log(f"Volume adjusted: {original_volume:.3f} → {volume:.3f} "
+                                 f"(min: {min_vol:.3f}, max: {max_vol:.3f})", 
+                                 "WARNING", "EXECUTOR")
+        
+        # 3. Advanced Margin Check with Safety Buffer
+        account = mt5.account_info()
+        if account:
+            # Calculate margin with contract size consideration
+            contract_size = getattr(symbol_info, 'trade_contract_size', 100)
+            margin_required = (volume * entry_price * contract_size) / account.leverage
+            
+            # Add safety buffer (15%)
+            margin_with_buffer = margin_required * 1.15
+            
+            # Check against free margin
+            if account.margin_free < margin_with_buffer:
+                margin_shortage = margin_with_buffer - account.margin_free
+                margin_ratio = account.margin_free / margin_with_buffer
+                
+                ProfessionalLogger.log(f"Insufficient Margin: Need ${margin_with_buffer:.2f} "
+                                     f"(incl 15% buffer), Have ${account.margin_free:.2f} | "
+                                     f"Shortage: ${margin_shortage:.2f} | "
+                                     f"Margin Ratio: {margin_ratio:.1%}", 
+                                     "ERROR", "EXECUTOR")
+                
+                # Suggest reduced volume that fits margin
+                safe_volume = (account.margin_free * 0.85 * account.leverage) / (entry_price * contract_size)
+                
+                if step > 0:
+                    safe_volume = round(safe_volume / step) * step
+                
+                safe_volume = max(min_vol, min(safe_volume, max_vol))
+                safe_volume = round(safe_volume, decimals)
+                
+                ProfessionalLogger.log(f"Suggested safe volume: {safe_volume:.3f} "
+                                     f"(from {volume:.3f})", "INFO", "EXECUTOR")
+                return None
+            
+            margin_ratio = margin_required / account.margin_free if account.margin_free > 0 else 0
+            ProfessionalLogger.log(f"Margin check passed: ${margin_required:.2f} required, "
+                                 f"${account.margin_free:.2f} available | "
+                                 f"Margin Ratio: {margin_ratio:.1%}", 
+                                 "DEBUG", "EXECUTOR")
+        else:
+            ProfessionalLogger.log("Could not retrieve account info", "ERROR", "EXECUTOR")
+            return None
+        
+        # 4. Advanced Spread Check with dynamic threshold
+        if Config.CHECK_SPREAD_BEFORE_ENTRY:
             tick = mt5.symbol_info_tick(symbol)
-            if not tick:
-                ProfessionalLogger.log("Cannot get current price", "ERROR", "EXECUTOR")
-                return None
-            
-            if signal == 1:
-                entry_price = tick.ask
-                order_type = mt5.ORDER_TYPE_BUY
-            else:
-                entry_price = tick.bid
-                order_type = mt5.ORDER_TYPE_SELL
-            
-            account = mt5.account_info()
-            if not account:
-                ProfessionalLogger.log("Cannot get account info", "ERROR", "EXECUTOR")
-                return None
-
-            positions = mt5.positions_get(symbol=symbol)
-            current_total_risk = 0
-            
-            symbol_info = mt5.symbol_info(symbol)
-            if not symbol_info:
-                ProfessionalLogger.log(f"Symbol {symbol} info not found", "ERROR", "EXECUTOR")
-                return None
+            if tick:
+                spread = (tick.ask - tick.bid) * 10000  # Convert to points
+                max_allowed_spread = Config.MAX_SPREAD_POINTS
                 
-            contract_size = getattr(symbol_info, 'trade_contract_size', 100000)
-            if not contract_size or contract_size == 0:
-                if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
-                    contract_size = 100
+                # Dynamic spread adjustment based on ATR volatility
+                try:
+                    rates = mt5.copy_rates_from_pos(symbol, Config.TIMEFRAME, 0, 20)
+                    if rates is not None and len(rates) > 0:
+                        df = pd.DataFrame(rates)
+                        atr = self._calculate_atr(df)
+                        atr_points = atr * 10000
+                        
+                        # Increase allowed spread in high volatility
+                        if atr_points > 20:  # High volatility
+                            max_allowed_spread = max(Config.MAX_SPREAD_POINTS, atr_points * 0.5)
+                            ProfessionalLogger.log(f"High volatility detected (ATR: {atr_points:.1f} pts). "
+                                                 f"Allowing wider spread: {max_allowed_spread:.1f} pts", 
+                                                 "DEBUG", "EXECUTOR")
+                except:
+                    pass
+                
+                if spread > max_allowed_spread:
+                    ProfessionalLogger.log(f"Spread too wide: {spread:.1f} pts > "
+                                         f"allowed {max_allowed_spread:.1f} pts", 
+                                         "WARNING", "EXECUTOR")
+                    return None
+                
+                ProfessionalLogger.log(f"Spread check passed: {spread:.1f} pts", "DEBUG", "EXECUTOR")
+        
+        # 5. Validate Stop Loss and Take Profit distances
+        if Config.REQUIRE_STOP_LOSS and sl == 0:
+            ProfessionalLogger.log("Stop loss required but not set", "ERROR", "EXECUTOR")
+            return None
+        
+        if Config.REQUIRE_TAKE_PROFIT and tp == 0:
+            ProfessionalLogger.log("Take profit required but not set", "ERROR", "EXECUTOR")
+            return None
+        
+        # Calculate SL/TP distances
+        sl_distance = abs(entry_price - sl) * 10000 if sl > 0 else 0  # Convert to points
+        tp_distance = abs(entry_price - tp) * 10000 if tp > 0 else 0
+        
+        # Validate minimum distances
+        if sl > 0 and sl_distance < Config.MIN_SL_DISTANCE_POINTS:
+            ProfessionalLogger.log(f"Stop loss too close: {sl_distance:.1f} pts < "
+                                 f"minimum {Config.MIN_SL_DISTANCE_POINTS} pts", 
+                                 "ERROR", "EXECUTOR")
+            return None
+        
+        if tp > 0 and tp_distance < Config.MIN_TP_DISTANCE_POINTS:
+            ProfessionalLogger.log(f"Take profit too close: {tp_distance:.1f} pts < "
+                                 f"minimum {Config.MIN_TP_DISTANCE_POINTS} pts", 
+                                 "ERROR", "EXECUTOR")
+            return None
+        
+        # Validate maximum distances
+        if sl > 0 and sl_distance > Config.MAX_SL_DISTANCE_POINTS:
+            ProfessionalLogger.log(f"Stop loss too far: {sl_distance:.1f} pts > "
+                                 f"maximum {Config.MAX_SL_DISTANCE_POINTS} pts", 
+                                 "ERROR", "EXECUTOR")
+            return None
+        
+        if tp > 0 and tp_distance > Config.MAX_TP_DISTANCE_POINTS:
+            ProfessionalLogger.log(f"Take profit too far: {tp_distance:.1f} pts > "
+                                 f"maximum {Config.MAX_TP_DISTANCE_POINTS} pts", 
+                                 "ERROR", "EXECUTOR")
+            return None
+        
+        # Validate Risk/Reward ratio
+        if sl > 0 and tp > 0:
+            rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+            if rr_ratio < Config.MIN_RR_RATIO:
+                ProfessionalLogger.log(f"Risk/Reward ratio too low: {rr_ratio:.2f} < "
+                                     f"minimum {Config.MIN_RR_RATIO}", 
+                                     "ERROR", "EXECUTOR")
+                return None
+            
+            ProfessionalLogger.log(f"RR Ratio: {rr_ratio:.2f}", "DEBUG", "EXECUTOR")
+        
+        # 6. Prepare Enhanced Request with additional parameters
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": float(entry_price),
+            "sl": float(sl) if sl > 0 else 0.0,
+            "tp": float(tp) if tp > 0 else 0.0,
+            "deviation": Config.MAX_SLIPPAGE_POINTS,
+            "magic": magic,
+            "comment": f"{comment} | Vol:{volume:.3f}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        # 7. Advanced Execution with Retry Logic and Price Adaptation
+        result = None
+        last_error = ""
+        
+        for attempt in range(Config.MAX_RETRIES):
+            try:
+                ProfessionalLogger.log(f"Order attempt {attempt + 1}/{Config.MAX_RETRIES} | "
+                                     f"{'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+                                     f"{volume:.3f} {symbol} @ {entry_price:.5f} "
+                                     f"(SL: {sl:.5f}, TP: {tp:.5f})", 
+                                     "INFO", "EXECUTOR")
+                
+                result = mt5.order_send(request)
+                
+                if result.retcode == mt5.TRADE_RETCODE_DONE:
+                    # Success!
+                    commission = abs(result.commission) if result.commission else 0
+                    swap = abs(result.swap) if result.swap else 0
+                    
+                    ProfessionalLogger.log(f"✅ Order Executed: #{result.order} | "
+                                         f"{'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+                                         f"{volume:.3f} {symbol} @ {entry_price:.5f} | "
+                                         f"Commission: ${commission:.2f}, Swap: ${swap:.2f} | "
+                                         f"Comment: {comment}", 
+                                         "SUCCESS", "EXECUTOR")
+                    
+                    # Log trade metrics
+                    if sl > 0:
+                        risk_per_trade = abs(entry_price - sl) * volume * contract_size
+                        ProfessionalLogger.log(f"💰 Trade Risk: ${risk_per_trade:.2f} | "
+                                             f"Risk %: {(risk_per_trade/account.equity*100):.2f}%", 
+                                             "RISK", "EXECUTOR")
+                    
+                    return result
+                
+                # Handle specific error conditions
+                elif result.retcode in [mt5.TRADE_RETCODE_REQUOTE, mt5.TRADE_RETCODE_PRICE_OFF]:
+                    last_error = f"Price changed (requote), retrying..."
+                    time.sleep(Config.RETRY_DELAY_MS / 1000)
+                    
+                    # Update price for retry
+                    tick = mt5.symbol_info_tick(symbol)
+                    if tick:
+                        new_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+                        request['price'] = float(new_price)
+                        
+                        # Also adjust SL/TP if they're relative to entry
+                        if sl > 0:
+                            sl_distance_points = abs(entry_price - sl) * 10000
+                            request['sl'] = float(new_price - (sl_distance_points / 10000)) if order_type == mt5.ORDER_TYPE_BUY else \
+                                          float(new_price + (sl_distance_points / 10000))
+                        
+                        if tp > 0:
+                            tp_distance_points = abs(entry_price - tp) * 10000
+                            request['tp'] = float(new_price + (tp_distance_points / 10000)) if order_type == mt5.ORDER_TYPE_BUY else \
+                                          float(new_price - (tp_distance_points / 10000))
+                        
+                        ProfessionalLogger.log(f"Price updated: {entry_price:.5f} → {new_price:.5f}", 
+                                             "DEBUG", "EXECUTOR")
+                
+                elif result.retcode == mt5.TRADE_RETCODE_NO_MONEY:
+                    last_error = "Insufficient funds"
+                    break  # Don't retry this error
+                
+                elif result.retcode == mt5.TRADE_RETCODE_MARKET_CLOSED:
+                    last_error = "Market is closed"
+                    break  # Don't retry this error
+                
+                elif result.retcode == mt5.TRADE_RETCODE_LIMIT_ORDERS:
+                    last_error = "Too many pending orders"
+                    break  # Don't retry this error
+                
                 else:
-                    contract_size = 100000
+                    last_error = f"{result.comment} (code: {result.retcode})"
+                    time.sleep(Config.RETRY_DELAY_MS / 1000)
             
-            if positions:
-                for pos in positions:
-                    if pos.sl > 0:
-                        risk = abs(pos.price_open - pos.sl) * pos.volume * contract_size
-                        current_total_risk += risk
+            except Exception as e:
+                last_error = str(e)
+                ProfessionalLogger.log(f"Exception during order send: {e}", "ERROR", "EXECUTOR")
+                time.sleep(Config.RETRY_DELAY_MS / 1000)
+        
+        # 8. Failed execution handling
+        if result:
+            error_details = mt5.last_error() if hasattr(mt5, 'last_error') else "Unknown"
+            ProfessionalLogger.log(f"❌ Order Failed after {Config.MAX_RETRIES} attempts: "
+                                 f"{last_error} | Details: {error_details} | "
+                                 f"Request: {request}", 
+                                 "ERROR", "EXECUTOR")
+        else:
+            ProfessionalLogger.log(f"❌ Order Failed: {last_error}", "ERROR", "EXECUTOR")
+        
+        return None
+    
+    def _calculate_atr(self, df, period=14):
+        """Helper method to calculate ATR"""
+        try:
+            high = df['high'].values
+            low = df['low'].values
+            close = df['close'].values
             
-            max_total_risk = account.equity * Config.MAX_TOTAL_RISK_PERCENT
-            available_risk = max_total_risk - current_total_risk
+            # Calculate True Range
+            tr = np.zeros(len(df))
+            for i in range(1, len(df)):
+                hl = high[i] - low[i]
+                hc = abs(high[i] - close[i-1])
+                lc = abs(low[i] - close[i-1])
+                tr[i] = max(hl, hc, lc)
             
-            if available_risk <= 0:
-                ProfessionalLogger.log(f"Aggregate Risk Limit Reached: ${current_total_risk:.2f} >= ${max_total_risk:.2f}", "RISK", "ENGINE")
-                return None
-
-            risk_amount = account.equity * Config.RISK_PERCENT
-            
-            if risk_amount > available_risk:
-                ProfessionalLogger.log(f"Scaling down risk to fit aggregate limit: {risk_amount:.2f} -> {available_risk:.2f}", "RISK", "ENGINE")
-                risk_amount = available_risk
-
-            atr = features.get('atr_percent', 0.001) * entry_price
-            if atr == 0:
-                atr = entry_price * 0.002
-            
-            if signal == 1:
-                stop_loss = entry_price - (atr * Config.ATR_SL_MULTIPLIER)
-                take_profit = entry_price + (atr * Config.ATR_TP_MULTIPLIER)
-            else:
-                stop_loss = entry_price + (atr * Config.ATR_SL_MULTIPLIER)
-                take_profit = entry_price - (atr * Config.ATR_TP_MULTIPLIER)
-            
-            sl_distance = abs(entry_price - stop_loss)
-            
-            if sl_distance > 0:
-                position_size = risk_amount / (sl_distance * contract_size)
-                
-                scaling_factor = confidence / 0.8
-                position_size = position_size * scaling_factor
-                
-                if hasattr(symbol_info, 'volume_step'):
-                    step = symbol_info.volume_step
-                    position_size = round(position_size / step) * step
-                
-                if hasattr(symbol_info, 'volume_min'):
-                    position_size = max(position_size, symbol_info.volume_min)
-                if hasattr(symbol_info, 'volume_max'):
-                    position_size = min(position_size, symbol_info.volume_max)
-            
-            result = self.order_executor.execute_trade(
-                symbol=symbol,
-                order_type=order_type,
-                volume=position_size,
-                entry_price=entry_price,
-                sl=stop_loss,
-                tp=take_profit,
-                magic=Config.MAGIC_NUMBER,
-                comment=f"EnhancedTrade_{signal}_{confidence:.2f}"
-            )
-            
-            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                trade_data = {
-                    'ticket': result.order,
-                    'symbol': symbol,
-                    'signal': signal,
-                    'type': 'BUY' if signal == 1 else 'SELL',
-                    'volume': position_size,
-                    'open_price': entry_price,
-                    'stop_loss': stop_loss,
-                    'take_profit': take_profit,
-                    'open_time': int(time.time()),
-                    'confidence': confidence,
-                    'features': features,
-                    'model_details': model_details,
-                    'status': 'open'
-                }
-                
-                self.active_positions[result.order] = trade_data
-                
-                ProfessionalLogger.log(f"✅ Trade #{result.order} opened successfully | "
-                                     f"{'BUY' if signal == 1 else 'SELL'} {position_size:.2f} lots at {entry_price:.2f}", 
-                                     "SUCCESS", "ENGINE")
-            
-            return result
+            # Calculate ATR
+            atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
+            return atr
             
         except Exception as e:
-            ProfessionalLogger.log(f"Error executing trade: {str(e)}", "ERROR", "ENGINE")
-            import traceback
-            traceback.print_exc()
-            return None
-    
+            ProfessionalLogger.log(f"ATR calculation error: {e}", "WARNING", "EXECUTOR")
+            return 0.001  # Default small value
     def run(self):
         """Main execution method"""
         print("\n" + "=" * 70)
