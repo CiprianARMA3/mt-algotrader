@@ -54,10 +54,10 @@ class Config:
     TIMEFRAME = mt5.TIMEFRAME_M15  # 15-min optimal for intraday gold trading
     
     # XAUUSD-specific: Gold typically trades in 0.01 lot increments
-    BASE_VOLUME = 0.25  # START SMALL - critical for risk management
-    MAX_VOLUME = 1   # Maximum position size cap
-    MIN_VOLUME = 0.25   # MT5 minimum for gold
-    VOLUME_STEP = 0.5  # Standard gold lot increment
+    BASE_VOLUME = 0.05  # START SMALL - critical for risk management
+    MAX_VOLUME = 0.30   # Maximum position size cap
+    MIN_VOLUME = 0.05   # MT5 minimum for gold
+    VOLUME_STEP = 0.01  # Standard gold lot increment
     
     MAGIC_NUMBER = 998877
     
@@ -70,7 +70,7 @@ class Config:
     MAX_RISK_PER_TRADE = 100  # Maximum $ risk per trade (failsafe)
     
     # Signal Quality Thresholds
-    MIN_CONFIDENCE = 0.50  # 70% minimum model confidence
+    MIN_CONFIDENCE = 0.70  # 70% minimum model confidence
     MIN_ENSEMBLE_AGREEMENT = 0.85  # 85% model agreement (increased precision)
     
     # Position Limits
@@ -105,7 +105,7 @@ class Config:
     # Retraining Schedule
     RETRAIN_HOURS = 24  # Retrain every 4 hours (was 3 - too frequent)
     RETRAIN_ON_PERFORMANCE_DROP = True  # Retrain if performance degrades
-    MIN_ACCURACY_THRESHOLD = 0.50  # Retrain if accuracy drops below 58%
+    MIN_ACCURACY_THRESHOLD = 0.58  # Retrain if accuracy drops below 58%
     
     # Walk-Forward Optimization
     WALK_FORWARD_WINDOW = 1000  # 500 bars per window
@@ -120,9 +120,9 @@ class Config:
     
     # Labeling Method
     TRIPLE_BARRIER_METHOD = True  # Use triple-barrier labeling
-    BARRIER_UPPER = 0.0030  # 0.30% = $3.00 (easier to hit, more predictable)
-    BARRIER_LOWER = -0.0020  # 0.20% = $2.00
-    BARRIER_TIME = 6  # 6 bars = 90 minutes (was 10 = too long)
+    BARRIER_UPPER = 0.0015  # 0.15% profit target (realistic for 15min)
+    BARRIER_LOWER = -0.0008  # 0.08% stop loss (tight but fair)
+    BARRIER_TIME = 10  # Exit after 10 bars if neither hit
     
     # Ensemble Configuration
     USE_STACKING_ENSEMBLE = True
@@ -273,7 +273,7 @@ class Config:
     
     # Execution Quality
     CHECK_SPREAD_BEFORE_ENTRY = True
-    MAX_SPREAD_POINTS = 30  # Maximum 5 points ($0.05) spread
+    MAX_SPREAD_POINTS = 5  # Maximum 5 points ($0.05) spread
     NORMAL_SPREAD_POINTS = 2  # Normal spread should be ~2 points
     
     # Commission
@@ -2906,7 +2906,7 @@ class ProfessionalTradingEngine:
                     ProfessionalLogger.log(f"❌ Insufficient data: {data_len} < {Config.TRAINING_MIN_SAMPLES} required", "ERROR", "ENGINE")
             else:
                 ProfessionalLogger.log(f"❌ Failed to retrieve historical data from MT5", "ERROR", "ENGINE")
-
+                
     def execute_trade(self, signal, confidence, df_current, features, model_details):
         """Execute a trade based on signal"""
         try:
