@@ -31,6 +31,7 @@ except ImportError:
 # ==========================================
 # PROFESSIONAL CONFIGURATION - ENHANCED
 # ==========================================
+
 class Config:
     """
     Ultra-Precise XAUUSD Trading Configuration
@@ -225,8 +226,8 @@ class Config:
     SESSION_AWARE_TRADING = True
     
     # Trading Sessions (UTC times)
-    AVOID_ASIAN_SESSION = False  #true
-    PREFER_LONDON_NY_OVERLAP = False #true
+    AVOID_ASIAN_SESSION = True  #true
+    PREFER_LONDON_NY_OVERLAP = True #true
     
     LONDON_OPEN_HOUR = 8
     LONDON_CLOSE_HOUR = 16
@@ -375,7 +376,40 @@ class Config:
     VALIDATE_RISK = True
     VALIDATE_STOPS = True
 
-# ==========================================
+        MULTI_TIMEFRAME_PARAMS = {
+        # Alignment bonus scaling
+        'ALIGNMENT_BONUS_ABOVE_START': 0.8,
+        'ALIGNMENT_BONUS_ABOVE_RANGE': 0.2,
+        'ALIGNMENT_BONUS_BELOW_START': 0.4,
+        'ALIGNMENT_BONUS_BELOW_RANGE': 0.4,
+        
+        # Trend bonus parameters
+        'TREND_BONUS_SUPPORT': 1.0,      # When H1 trend supports trade
+        'TREND_BONUS_NEUTRAL': 0.8,      # When H1 is neutral
+        'TREND_BONUS_OPPOSITE': 0.5,     # When H1 trend opposes trade
+        
+        # Confidence calculation
+        'BASE_CONFIDENCE_MULTIPLIER': 0.9,
+        'CONFIDENCE_FLOOR': 0.2,
+        'CONFIDENCE_CEILING': 0.95,
+        
+        # Signal generation parameters
+        'BUY_SIGNAL_THRESHOLD': 0.5,
+        'SELL_SIGNAL_THRESHOLD': -0.5,
+        
+        # Timeframe signal multipliers
+        'M5_SIGNAL_MULTIPLIER': 0.8,
+        'M15_SIGNAL_MULTIPLIER': 1.0,
+        'H1_SIGNAL_MULTIPLIER': 1.2,
+        
+        # Feature weight adjustments for Asian session
+        'ASIAN_SESSION_ADJUSTMENTS': {
+            'trend_direction_weight': 0.8,
+            'rsi_weight': 1.2,
+            'volatility_weight': 0.7,
+            'price_position_weight': 1.1
+        }
+    }# ==========================================
 # PROFESSIONAL LOGGING
 # ==========================================
 class ProfessionalLogger:
@@ -3250,38 +3284,69 @@ class MultiTimeframeAnalyser:
                     analysis['trend_filter'] = -1
                 else:
                     analysis['trend_filter'] = 1
-                
+        
+        # Use Config parameters for confidence calculation
         alignment_threshold = self.config.TIMEFRAME_ALIGNMENT_THRESHOLD
-
+        
+        # Get multi-timeframe analysis parameters from Config
+        mtf_params = getattr(self.config, 'MULTI_TIMEFRAME_PARAMS', {})
+        
+        # Alignment bonus parameters with defaults
+        alignment_bonus_above_start = mtf_params.get('ALIGNMENT_BONUS_ABOVE_START', 0.8)
+        alignment_bonus_above_range = mtf_params.get('ALIGNMENT_BONUS_ABOVE_RANGE', 0.2)
+        alignment_bonus_below_start = mtf_params.get('ALIGNMENT_BONUS_BELOW_START', 0.4)
+        alignment_bonus_below_range = mtf_params.get('ALIGNMENT_BONUS_BELOW_RANGE', 0.4)
+        
+        # Trend bonus parameters with defaults
+        trend_bonus_support = mtf_params.get('TREND_BONUS_SUPPORT', 1.0)
+        trend_bonus_neutral = mtf_params.get('TREND_BONUS_NEUTRAL', 0.8)
+        trend_bonus_opposite = mtf_params.get('TREND_BONUS_OPPOSITE', 0.5)
+        
+        # Confidence calculation parameters
+        base_confidence_multiplier = mtf_params.get('BASE_CONFIDENCE_MULTIPLIER', 0.9)
+        confidence_floor = mtf_params.get('CONFIDENCE_FLOOR', 0.2)
+        confidence_ceiling = mtf_params.get('CONFIDENCE_CEILING', 0.95)
+        
         # 1. Gradual alignment bonus (not binary)
         alignment_score = analysis['alignment_score']
         if alignment_score >= alignment_threshold:
-            # Above threshold: scale from 0.8 to 1.0
-            alignment_bonus = 0.8 + (alignment_score - alignment_threshold) / (1 - alignment_threshold) * 0.2
+            # Above threshold: scale from ALIGNMENT_BONUS_ABOVE_START to ALIGNMENT_BONUS_ABOVE_START + ALIGNMENT_BONUS_ABOVE_RANGE
+            alignment_bonus = alignment_bonus_above_start + (
+                (alignment_score - alignment_threshold) / (1 - alignment_threshold) * alignment_bonus_above_range
+            )
         else:
-            # Below threshold: scale from 0.4 to 0.8
-            alignment_bonus = 0.4 + (alignment_score / alignment_threshold) * 0.4
-
-        # 2. Trend bonus with H1 dominance but not too harsh
+            # Below threshold: scale from ALIGNMENT_BONUS_BELOW_START to ALIGNMENT_BONUS_BELOW_START + ALIGNMENT_BONUS_BELOW_RANGE
+            alignment_bonus = alignment_bonus_below_start + (
+                (alignment_score / alignment_threshold) * alignment_bonus_below_range
+            )
+        
+        # 2. Trend bonus with H1 dominance
         if analysis['trend_filter'] == 1:
-            trend_bonus = 1.0  # H1 supports trade
+            trend_bonus = trend_bonus_support  # H1 supports trade
         elif analysis['trend_filter'] == 0:  # Neutral
-            trend_bonus = 0.8  # H1 neutral - moderate penalty (was 0.7)
+            trend_bonus = trend_bonus_neutral  # H1 neutral
         else:  # -1 (opposite)
-            trend_bonus = 0.5  # H1 opposite - stronger penalty but not killer
-
+            trend_bonus = trend_bonus_opposite  # H1 opposite
+        
         # 3. Calculate confidence with market regime adjustment
-        base_confidence = alignment_bonus * trend_bonus * 0.9
-
+        base_confidence = alignment_bonus * trend_bonus * base_confidence_multiplier
+        
         # 4. Apply confidence floor and ceiling
-        analysis['confidence'] = max(0.2, min(0.95, base_confidence))
-
+        analysis['confidence'] = max(confidence_floor, min(confidence_ceiling, base_confidence))
+        
         return analysis
     
     def _generate_timeframe_signal(self, features, timeframe_name):
         """Generate trading signal for a single timeframe"""
         if not features:
             return 0.5
+        
+        # Get multi-timeframe parameters from Config
+        mtf_params = getattr(self.config, 'MULTI_TIMEFRAME_PARAMS', {})
+        
+        # Get timeframe-specific multiplier
+        multiplier_key = f'{timeframe_name.upper()}_SIGNAL_MULTIPLIER'
+        timeframe_multiplier = mtf_params.get(multiplier_key, 1.0)
         
         signal_score = 0
         
@@ -3303,16 +3368,31 @@ class MultiTimeframeAnalyser:
         momentum = features.get('momentum', 0)
         signal_score += 1 if momentum > 0.005 else -1 if momentum < -0.005 else 0
         
-        if timeframe_name == 'M5':
-            signal_score *= 0.8
-        elif timeframe_name == 'H1':
-            signal_score *= 1.2
+        # Apply Asian session adjustments if in Asian session
+        hour = datetime.now().hour
+        if 0 <= hour < 9:  # Asian session
+            adjustments = mtf_params.get('ASIAN_SESSION_ADJUSTMENTS', {})
+            # Adjust weights of different components
+            if adjustments:
+                signal_score = (
+                    (trend * adjustments.get('trend_direction_weight', 1.0)) +
+                    ((1 if rsi < 30 else -1 if rsi > 70 else 0) * adjustments.get('rsi_weight', 1.0)) +
+                    ((1 if momentum > 0.005 else -1 if momentum < -0.005 else 0) * adjustments.get('volatility_weight', 1.0))
+                )
         
+        # Apply timeframe multiplier
+        signal_score *= timeframe_multiplier
+        
+        # Get signal thresholds from config
+        buy_threshold = mtf_params.get('BUY_SIGNAL_THRESHOLD', 0.5)
+        sell_threshold = mtf_params.get('SELL_SIGNAL_THRESHOLD', -0.5)
+        
+        # Normalize score and apply thresholds
         normalized_score = max(-1, min(1, signal_score / 4))
         
-        if normalized_score > 0.2:
+        if normalized_score > buy_threshold:
             return 1
-        elif normalized_score < -0.2:
+        elif normalized_score < sell_threshold:
             return 0
         else:
             return 0.5
