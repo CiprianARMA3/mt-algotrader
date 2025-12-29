@@ -51,29 +51,7 @@ class Config:
     # TRADING INSTRUMENT SPECIFICATIONS
     # ==========================================
     SYMBOL = "XAUUSD"
-    PRIMARY_TIMEFRAME = mt5.TIMEFRAME_M15  # Primary timeframe for trading decisions
-    
-    # MULTI-TIMEFRAME CONFIGURATION
-    MULTI_TIMEFRAME_ENABLED = True
-    COMPARISON_TIMEFRAMES = [
-        ('M1', mt5.TIMEFRAME_M1),
-        ('M5', mt5.TIMEFRAME_M5),
-        ('M15', mt5.TIMEFRAME_M15),
-        ('M30', mt5.TIMEFRAME_M30),
-        ('H1', mt5.TIMEFRAME_H1)
-    ]
-    
-    # Timeframe weights for ensemble decisions
-    TIMEFRAME_WEIGHTS = {
-        'M1': 0.1,   # 10% weight - noise filtering
-        'M5': 0.2,   # 20% weight - short-term momentum
-        'M15': 0.35, # 35% weight - primary trading
-        'M30': 0.2,  # 20% weight - medium-term trend
-        'H1': 0.15   # 15% weight - long-term context
-    }
-    
-    # Timeframe alignment requirements
-    TIMEFRAME_ALIGNMENT_THRESHOLD = 0.70  # Need 70% agreement across timeframes
+    TIMEFRAME = mt5.TIMEFRAME_M5  # 15-min optimal for intraday gold trading
     
     # XAUUSD-specific: Gold typically trades in 0.01 lot increments
     BASE_VOLUME = 0.25  # START SMALL - critical for risk management
@@ -93,9 +71,8 @@ class Config:
     MAX_RISK_PER_TRADE = 100  # Maximum $ risk per trade (failsafe)
     
     # Signal Quality Thresholds
-    MIN_CONFIDENCE = 0.50  # 50% minimum model confidence
-    MIN_ENSEMBLE_AGREEMENT = 0.60  # 60% model agreement
-    MIN_TIMEFRAME_AGREEMENT = 0.60  # 60% timeframe agreement
+    MIN_CONFIDENCE = 0.50  # 70% minimum model confidence
+    MIN_ENSEMBLE_AGREEMENT = 0.60  # 85% model agreement (increased precision)
     
     # Position Limits
     MAX_POSITIONS = 5  # Allow multiple positions (stacking)
@@ -109,7 +86,7 @@ class Config:
     MAX_CONSECUTIVE_LOSSES = 3  # Stop after 3 losses in a row
     
     # Kelly Criterion
-    KELLY_FRACTION = 0.15  # Conservative 15% of Kelly
+    KELLY_FRACTION = 0.15  # Conservative 15% of Kelly (was 20%)
     USE_HALF_KELLY = True  # Use half-Kelly for extra safety
     
     # Statistical Risk Metrics
@@ -122,17 +99,17 @@ class Config:
     # ==========================================
     
     # Data Collection
-    LOOKBACK_BARS = 65000  # 65000 bars for stable statistics
+    LOOKBACK_BARS = 65000  # 8000 bars for stable statistics 
     TRAINING_MIN_SAMPLES = 6000  # Minimum samples for reliable training
     VALIDATION_SPLIT = 0.20  # 20% validation set
     
     # Retraining Schedule
-    RETRAIN_HOURS = 24  # Retrain every 24 hours
+    RETRAIN_HOURS = 24  # Retrain every 4 hours (was 3 - too frequent)
     RETRAIN_ON_PERFORMANCE_DROP = True  # Retrain if performance degrades
-    MIN_ACCURACY_THRESHOLD = 0.50  # Retrain if accuracy drops below 50%
+    MIN_ACCURACY_THRESHOLD = 0.50  # Retrain if accuracy drops below 58%
     
     # Walk-Forward Optimization
-    WALK_FORWARD_WINDOW = 1000  # 1000 bars per window
+    WALK_FORWARD_WINDOW = 1000  # 500 bars per window
     WALK_FORWARD_STEP = 100  # 100 bar step (80% overlap)
     WALK_FORWARD_FOLDS = 5  # 5-fold cross-validation
     
@@ -144,9 +121,9 @@ class Config:
     
     # Labeling Method
     TRIPLE_BARRIER_METHOD = True  # Use triple-barrier labeling
-    BARRIER_UPPER = 0.0030  # 0.30% = $3.00
-    BARRIER_LOWER = -0.0020  # -0.20% = $2.00
-    BARRIER_TIME = 6  # 6 bars = 90 minutes
+    BARRIER_UPPER = 0.0030  # 0.30% = $3.00 (easier to hit, more predictable)
+    BARRIER_LOWER = -0.0020  # 0.20% = $2.00
+    BARRIER_TIME = 6  # 6 bars = 90 minutes (was 10 = too long)
     
     # Ensemble Configuration
     USE_STACKING_ENSEMBLE = True
@@ -163,9 +140,9 @@ class Config:
     # ==========================================
     
     # Trend Indicators
-    ATR_PERIOD = 14  # Standard ATR
+    ATR_PERIOD = 14  # Standard ATR (14 is industry standard)
     RSI_PERIOD = 14  # Standard RSI
-    ADX_PERIOD = 14  # Standard ADX
+    ADX_PERIOD = 14  # Standard ADX (14 better than 20 for responsiveness)
     
     # Moving Averages (Gold-specific)
     FAST_MA = 8   # Fast MA for gold trends
@@ -196,7 +173,7 @@ class Config:
     VAR_LOOKBACK = 100  # VaR calculation window
     
     # Correlation Analysis
-    CORRELATION_WINDOW = 50  # 50 bars for correlations
+    CORRELATION_WINDOW = 50  # 50 bars for correlations (was 100 - too slow)
     CORRELATED_SYMBOLS = ["DXY", "US10Y", "EURUSD"]  # Dollar index, yields, EUR
     
     # ==========================================
@@ -210,7 +187,7 @@ class Config:
     ATR_TP_MULTIPLIER = 3.0  # 3.0x ATR for take profit (2:1 R:R)
     
     # Minimum Risk/Reward
-    MIN_RR_RATIO = 2.0  # Minimum 2:1 reward:risk
+    MIN_RR_RATIO = 1.25  # Minimum 2:1 reward:risk
     
     # Fixed Stops (backup if ATR unavailable)
     FIXED_SL_PERCENT = 0.0035  # 0.35% stop loss
@@ -260,6 +237,7 @@ class Config:
     SESSION_AWARE_TRADING = True
     
     # Trading Sessions (UTC times)
+    # Gold is most active during London (8-11 UTC) and NY (13-17 UTC)
     AVOID_ASIAN_SESSION = True  # Skip 0-7 UTC (low liquidity)
     PREFER_LONDON_NY_OVERLAP = True  # 13-16 UTC (highest volume)
     
@@ -296,7 +274,7 @@ class Config:
     
     # Execution Quality
     CHECK_SPREAD_BEFORE_ENTRY = True
-    MAX_SPREAD_POINTS = 30  # Maximum 30 points ($0.30) spread
+    MAX_SPREAD_POINTS = 30  # Maximum 5 points ($0.05) spread
     NORMAL_SPREAD_POINTS = 2  # Normal spread should be ~2 points
     
     # Commission
@@ -309,7 +287,7 @@ class Config:
     # Minimum Performance Standards
     MIN_SHARPE_RATIO = 0.8  # Minimum Sharpe ratio
     MIN_PROFIT_FACTOR = 1.5  # Minimum profit factor
-    MIN_WIN_RATE = 0.45  # Minimum 45% win rate
+    MIN_WIN_RATE = 0.45  # Minimum 45% win rate acceptable with 2:1 R:R
     MAX_DRAWDOWN_DURATION = 10  # Max 10 trades in drawdown
     
     # Statistical Testing
@@ -331,7 +309,7 @@ class Config:
     POOR_PERFORMANCE_THRESHOLD = 0.40  # 40% win rate = poor
     
     # Position Size Adjustments
-    INCREASE_SIZE_AFTER_WINS = False  # Don't increase after wins
+    INCREASE_SIZE_AFTER_WINS = False  # Don't increase after wins (anti-martingale)
     DECREASE_SIZE_AFTER_LOSSES = True  # Decrease after losses
     SIZE_DECREASE_FACTOR = 0.8  # Reduce to 80% after loss
     SIZE_RECOVERY_FACTOR = 1.1  # Increase back slowly
@@ -354,6 +332,19 @@ class Config:
     LOG_TRADES = True
     LOG_PREDICTIONS = True
     LOG_PERFORMANCE = True
+    
+    # ==========================================
+    # MULTI-TIMEFRAME ANALYSIS
+    # ==========================================
+    
+    MULTI_TIMEFRAME_ENABLED = True
+    TIMEFRAMES = ['M5', 'M15', 'H1']  # 5min, 15min, 1hour
+    TIMEFRAME_WEIGHTS = [0.2, 0.5, 0.3]  # Weight M15 most heavily
+    TIMEFRAME_ALIGNMENT_THRESHOLD = 0.75  # Need 75% agreement
+    
+    # Timeframe-specific parameters
+    LONG_TIMEFRAME_TREND_FILTER = True  # Use H1 for trend direction
+    SHORT_TIMEFRAME_ENTRY = True  # Use M5 for precise entry
     
     # ==========================================
     # GOLD-SPECIFIC PARAMETERS
@@ -439,477 +430,16 @@ class ProfessionalLogger:
             'PERFORMANCE': ProfessionalLogger.COLORS['MAGENTA'],
             'BACKTEST': ProfessionalLogger.COLORS['GRAY'],
             'STATISTICS': ProfessionalLogger.COLORS['BLUE'],
-            'ANALYSIS': ProfessionalLogger.COLORS['CYAN'],
-            'TIMEFRAME': ProfessionalLogger.COLORS['MAGENTA'],
-            'COMPARISON': ProfessionalLogger.COLORS['CYAN']
+            'ANALYSIS': ProfessionalLogger.COLORS['CYAN']
         }
         color = colors.get(level, ProfessionalLogger.COLORS['RESET'])
         print(f"{timestamp} [{color}{level:8s}{ProfessionalLogger.COLORS['RESET']}] [{component:12s}] {message}", flush=True)
 
 # ==========================================
-# MULTI-TIMEFRAME STATISTICAL ANALYZER
-# ==========================================
-class MultiTimeframeStatisticalAnalyzer:
-    """Advanced statistical analysis across multiple timeframes"""
-    
-    def __init__(self):
-        self.timeframe_data = {}
-        self.comparison_results = {}
-        
-    def fetch_multi_timeframe_data(self, symbol, bars_per_tf=1000):
-        """Fetch data for all comparison timeframes"""
-        data_frames = {}
-        
-        for tf_name, tf_enum in Config.COMPARISON_TIMEFRAMES:
-            try:
-                rates = mt5.copy_rates_from_pos(symbol, tf_enum, 0, bars_per_tf)
-                if rates is not None and len(rates) > 0:
-                    df = pd.DataFrame(rates)
-                    df['timeframe'] = tf_name
-                    data_frames[tf_name] = df
-                    ProfessionalLogger.log(f"Fetched {len(df)} bars for {tf_name}", "DATA", "MTF_ANALYZER")
-                else:
-                    ProfessionalLogger.log(f"No data for {tf_name}", "WARNING", "MTF_ANALYZER")
-            except Exception as e:
-                ProfessionalLogger.log(f"Error fetching {tf_name}: {str(e)}", "ERROR", "MTF_ANALYZER")
-        
-        self.timeframe_data = data_frames
-        return data_frames
-    
-    def calculate_statistical_metrics(self, df):
-        """Calculate comprehensive statistical metrics for a timeframe"""
-        if df is None or len(df) < 100:
-            return None
-        
-        try:
-            # Calculate returns
-            returns = df['close'].pct_change().dropna()
-            
-            if len(returns) < 50:
-                return None
-            
-            # Basic statistics
-            stats = {
-                'n_samples': len(returns),
-                'mean_return': np.mean(returns),
-                'median_return': np.median(returns),
-                'std_return': np.std(returns),
-                'skewness': skew(returns),
-                'kurtosis': kurtosis(returns),
-                'min_return': np.min(returns),
-                'max_return': np.max(returns),
-                'range': np.ptp(returns),
-                'q1': np.percentile(returns, 25),
-                'q3': np.percentile(returns, 75),
-                'iqr': np.percentile(returns, 75) - np.percentile(returns, 25),
-                'sharpe': np.mean(returns) / np.std(returns) * np.sqrt(252 * 96) if np.std(returns) > 0 else 0,
-                'sortino': np.mean(returns) / np.std(returns[returns < 0]) * np.sqrt(252 * 96) if len(returns[returns < 0]) > 0 else 0,
-                'var_95': np.percentile(returns, 5),
-                'var_99': np.percentile(returns, 1),
-                'cvar_95': np.mean(returns[returns <= np.percentile(returns, 5)]) if len(returns[returns <= np.percentile(returns, 5)]) > 0 else np.percentile(returns, 5),
-                'cvar_99': np.mean(returns[returns <= np.percentile(returns, 1)]) if len(returns[returns <= np.percentile(returns, 1)]) > 0 else np.percentile(returns, 1),
-                'positive_ratio': len(returns[returns > 0]) / len(returns) if len(returns) > 0 else 0,
-                'negative_ratio': len(returns[returns < 0]) / len(returns) if len(returns) > 0 else 0,
-                'zero_ratio': len(returns[returns == 0]) / len(returns) if len(returns) > 0 else 0
-            }
-            
-            # Volatility metrics
-            stats['realized_volatility'] = np.std(returns) * np.sqrt(252 * 96)
-            stats['annualized_vol'] = stats['realized_volatility']
-            
-            # Calculate rolling volatility
-            if len(returns) > 100:
-                rolling_vol = returns.rolling(20).std().dropna()
-                stats['volatility_mean'] = np.mean(rolling_vol)
-                stats['volatility_std'] = np.std(rolling_vol)
-                stats['volatility_ratio'] = stats['volatility_mean'] / stats['std_return'] if stats['std_return'] > 0 else 1
-            
-            # Market regime indicators
-            hurst = self.calculate_hurst_exponent(df['close'].values)
-            stats['hurst_exponent'] = hurst
-            
-            if hurst > 0.55:
-                stats['market_regime'] = 'trending'
-            elif hurst < 0.45:
-                stats['market_regime'] = 'mean_reverting'
-            else:
-                stats['market_regime'] = 'random'
-            
-            # Autocorrelation
-            if len(returns) > 20:
-                autocorr = np.corrcoef(returns[:-1], returns[1:])[0, 1] if len(returns) > 1 else 0
-                stats['autocorrelation_lag1'] = autocorr
-                
-                # Check for momentum/mean-reversion
-                if autocorr > 0.1:
-                    stats['momentum_bias'] = 'positive'
-                elif autocorr < -0.1:
-                    stats['momentum_bias'] = 'negative'
-                else:
-                    stats['momentum_bias'] = 'neutral'
-            
-            # Price range statistics
-            df['range'] = df['high'] - df['low']
-            stats['avg_range'] = np.mean(df['range'])
-            stats['range_std'] = np.std(df['range'])
-            stats['range_to_close'] = stats['avg_range'] / df['close'].mean() if df['close'].mean() > 0 else 0
-            
-            # Volume analysis (if available)
-            if 'tick_volume' in df.columns:
-                volume = df['tick_volume']
-                stats['avg_volume'] = np.mean(volume)
-                stats['volume_std'] = np.std(volume)
-                stats['volume_skew'] = skew(volume) if len(volume) > 0 else 0
-                stats['volume_kurtosis'] = kurtosis(volume) if len(volume) > 0 else 0
-                
-                # Volume-price correlation
-                if len(returns) > 10:
-                    volume_returns_corr = np.corrcoef(volume[-len(returns):], returns)[0, 1]
-                    stats['volume_price_correlation'] = volume_returns_corr
-            
-            return stats
-            
-        except Exception as e:
-            ProfessionalLogger.log(f"Error calculating stats: {str(e)}", "ERROR", "MTF_ANALYZER")
-            return None
-    
-    def calculate_hurst_exponent(self, prices, max_lags=100):
-        """Calculate Hurst exponent using R/S method"""
-        if len(prices) < 100:
-            return 0.5
-        
-        try:
-            lags = range(2, min(max_lags, len(prices)//4))
-            tau = []
-            lagvec = []
-            
-            for lag in lags:
-                # Calculate R/S for different lags
-                rs_values = []
-                for i in range(0, len(prices) - lag, lag):
-                    segment = prices[i:i+lag]
-                    if len(segment) < 2:
-                        continue
-                    
-                    mean_seg = np.mean(segment)
-                    deviations = segment - mean_seg
-                    z = np.cumsum(deviations)
-                    r = np.max(z) - np.min(z)
-                    s = np.std(segment)
-                    
-                    if s > 0:
-                        rs_values.append(r / s)
-                
-                if rs_values:
-                    tau.append(np.log(np.mean(rs_values)))
-                    lagvec.append(np.log(lag))
-            
-            if len(tau) < 3:
-                return 0.5
-            
-            # Fit line to log-log plot
-            hurst, _ = np.polyfit(lagvec, tau, 1)
-            return hurst
-            
-        except Exception as e:
-            ProfessionalLogger.log(f"Hurst calculation error: {str(e)}", "WARNING", "MTF_ANALYZER")
-            return 0.5
-    
-    def compare_timeframes(self):
-        """Compare statistical metrics across timeframes"""
-        if not self.timeframe_data:
-            return None
-        
-        comparison = {
-            'timeframes': {},
-            'consistency_metrics': {},
-            'alignment_scores': {}
-        }
-        
-        all_stats = {}
-        
-        # Calculate stats for each timeframe
-        for tf_name, df in self.timeframe_data.items():
-            stats = self.calculate_statistical_metrics(df)
-            if stats:
-                all_stats[tf_name] = stats
-                comparison['timeframes'][tf_name] = stats
-        
-        if not all_stats:
-            return comparison
-        
-        # Calculate consistency metrics
-        consistency = {}
-        
-        # Check trend consistency
-        trends = {}
-        for tf_name, stats in all_stats.items():
-            if 'market_regime' in stats:
-                trends[tf_name] = stats['market_regime']
-        
-        # Calculate regime alignment
-        regime_counts = {}
-        for regime in trends.values():
-            regime_counts[regime] = regime_counts.get(regime, 0) + 1
-        
-        if regime_counts:
-            dominant_regime = max(regime_counts, key=regime_counts.get)
-            regime_alignment = regime_counts[dominant_regime] / len(trends)
-            consistency['regime_alignment'] = regime_alignment
-            consistency['dominant_regime'] = dominant_regime
-        
-        # Check volatility consistency
-        volatilities = {}
-        for tf_name, stats in all_stats.items():
-            if 'realized_volatility' in stats:
-                volatilities[tf_name] = stats['realized_volatility']
-        
-        if volatilities:
-            vol_mean = np.mean(list(volatilities.values()))
-            vol_std = np.std(list(volatilities.values()))
-            consistency['volatility_mean'] = vol_mean
-            consistency['volatility_std'] = vol_std
-            consistency['volatility_cv'] = vol_std / vol_mean if vol_mean > 0 else 0
-        
-        # Check return distribution consistency
-        returns_mean = {}
-        returns_std = {}
-        
-        for tf_name, stats in all_stats.items():
-            if 'mean_return' in stats:
-                returns_mean[tf_name] = stats['mean_return']
-            if 'std_return' in stats:
-                returns_std[tf_name] = stats['std_return']
-        
-        if returns_mean and returns_std:
-            consistency['returns_mean_consistency'] = np.std(list(returns_mean.values())) / abs(np.mean(list(returns_mean.values()))) if np.mean(list(returns_mean.values())) != 0 else 0
-            consistency['returns_std_consistency'] = np.std(list(returns_std.values())) / np.mean(list(returns_std.values())) if np.mean(list(returns_std.values())) > 0 else 0
-        
-        # Calculate timeframe alignment scores
-        alignment_scores = {}
-        
-        # Score based on regime consistency
-        if 'regime_alignment' in consistency:
-            alignment_scores['regime'] = consistency['regime_alignment']
-        
-        # Score based on volatility consistency
-        if 'volatility_cv' in consistency:
-            # Lower CV is better (more consistent)
-            volatility_score = max(0, 1 - consistency['volatility_cv'])
-            alignment_scores['volatility'] = volatility_score
-        
-        # Score based on trend direction
-        trend_scores = {}
-        for tf_name, df in self.timeframe_data.items():
-            if len(df) > 20:
-                # Simple trend calculation
-                returns_20 = df['close'].pct_change(20).iloc[-1] if len(df) > 20 else 0
-                trend_scores[tf_name] = 1 if returns_20 > 0 else 0 if returns_20 < 0 else 0.5
-        
-        if trend_scores:
-            trend_alignment = np.mean(list(trend_scores.values()))
-            alignment_scores['trend'] = 1 - abs(2 * trend_alignment - 1)  # 1 = perfect alignment, 0 = perfect disagreement
-        
-        # Overall alignment score
-        if alignment_scores:
-            weights = {
-                'regime': 0.4,
-                'volatility': 0.3,
-                'trend': 0.3
-            }
-            
-            overall_score = 0
-            total_weight = 0
-            for component, score in alignment_scores.items():
-                weight = weights.get(component, 0)
-                overall_score += score * weight
-                total_weight += weight
-            
-            if total_weight > 0:
-                alignment_scores['overall'] = overall_score / total_weight
-            else:
-                alignment_scores['overall'] = 0.5
-        
-        comparison['consistency_metrics'] = consistency
-        comparison['alignment_scores'] = alignment_scores
-        
-        # Store for future reference
-        self.comparison_results = comparison
-        
-        return comparison
-    
-    def generate_comparison_report(self):
-        """Generate comprehensive comparison report"""
-        if not self.comparison_results:
-            self.compare_timeframes()
-        
-        report = []
-        
-        ProfessionalLogger.log("=" * 80, "COMPARISON", "MTF_ANALYZER")
-        ProfessionalLogger.log("📊 MULTI-TIMEFRAME STATISTICAL COMPARISON REPORT", "COMPARISON", "MTF_ANALYZER")
-        ProfessionalLogger.log("=" * 80, "COMPARISON", "MTF_ANALYZER")
-        
-        # Timeframe-specific statistics
-        for tf_name, stats in self.comparison_results.get('timeframes', {}).items():
-            report.append(f"\n📈 {tf_name} Timeframe:")
-            report.append(f"  Samples: {stats.get('n_samples', 0):,}")
-            report.append(f"  Mean Return: {stats.get('mean_return', 0):.6f}")
-            report.append(f"  Volatility: {stats.get('realized_volatility', 0):.4f}")
-            report.append(f"  Sharpe: {stats.get('sharpe', 0):.3f}")
-            report.append(f"  Regime: {stats.get('market_regime', 'unknown')} (H={stats.get('hurst_exponent', 0.5):.3f})")
-            report.append(f"  VaR(95%): {stats.get('var_95', 0):.6f}")
-            report.append(f"  Positive Ratio: {stats.get('positive_ratio', 0):.1%}")
-        
-        # Consistency metrics
-        consistency = self.comparison_results.get('consistency_metrics', {})
-        if consistency:
-            report.append("\n🔗 CONSISTENCY METRICS:")
-            report.append(f"  Dominant Regime: {consistency.get('dominant_regime', 'unknown')}")
-            report.append(f"  Regime Alignment: {consistency.get('regime_alignment', 0):.1%}")
-            report.append(f"  Volatility CV: {consistency.get('volatility_cv', 0):.3f}")
-        
-        # Alignment scores
-        alignment = self.comparison_results.get('alignment_scores', {})
-        if alignment:
-            report.append("\n🎯 ALIGNMENT SCORES:")
-            for component, score in alignment.items():
-                if component != 'overall':
-                    report.append(f"  {component.capitalize()}: {score:.3f}")
-            
-            if 'overall' in alignment:
-                overall_score = alignment['overall']
-                report.append(f"\n📊 OVERALL ALIGNMENT: {overall_score:.3f}")
-                
-                if overall_score > 0.7:
-                    report.append("  ✅ STRONG TIMEFRAME ALIGNMENT - High confidence")
-                elif overall_score > 0.5:
-                    report.append("  ⚠ MODERATE ALIGNMENT - Proceed with caution")
-                else:
-                    report.append("  ❌ POOR ALIGNMENT - Consider avoiding trades")
-        
-        # Trading implications
-        report.append("\n💡 TRADING IMPLICATIONS:")
-        
-        # Check if we have enough agreement
-        if 'overall' in alignment:
-            if alignment['overall'] >= Config.MIN_TIMEFRAME_AGREEMENT:
-                report.append("  ✓ Timeframes aligned - Trading signals more reliable")
-            else:
-                report.append("  ✗ Timeframes divergent - Signals less reliable")
-        
-        # Market regime implications
-        dominant_regime = consistency.get('dominant_regime', '')
-        if dominant_regime == 'trending':
-            report.append("  ✓ Trending market - Trend-following strategies preferred")
-        elif dominant_regime == 'mean_reverting':
-            report.append("  ✓ Mean-reverting market - Reversal strategies preferred")
-        elif dominant_regime == 'random':
-            report.append("  ⚠ Random market - Consider reducing position sizes")
-        
-        ProfessionalLogger.log("\n".join(report), "COMPARISON", "MTF_ANALYZER")
-        ProfessionalLogger.log("=" * 80, "COMPARISON", "MTF_ANALYZER")
-        
-        return "\n".join(report)
-    
-    def get_trading_recommendation(self):
-        """Get trading recommendation based on multi-timeframe analysis"""
-        if not self.comparison_results:
-            self.compare_timeframes()
-        
-        recommendation = {
-            'trade_signal': 'HOLD',
-            'confidence': 0.0,
-            'reasoning': [],
-            'risk_adjustment': 1.0,
-            'timeframe_analysis': {}
-        }
-        
-        alignment = self.comparison_results.get('alignment_scores', {})
-        consistency = self.comparison_results.get('consistency_metrics', {})
-        
-        # Check overall alignment
-        overall_alignment = alignment.get('overall', 0.5)
-        
-        if overall_alignment < Config.MIN_TIMEFRAME_AGREEMENT:
-            recommendation['trade_signal'] = 'AVOID'
-            recommendation['confidence'] = 0.0
-            recommendation['reasoning'].append(f"Poor timeframe alignment ({overall_alignment:.2f})")
-            recommendation['risk_adjustment'] = 0.0
-            return recommendation
-        
-        # Analyze trend across timeframes
-        trend_signals = {}
-        for tf_name, stats in self.comparison_results.get('timeframes', {}).items():
-            if 'mean_return' in stats:
-                # Simple trend signal based on recent returns
-                mean_return = stats['mean_return']
-                if mean_return > 0.0001:  # Positive trend
-                    trend_signals[tf_name] = 'BULLISH'
-                elif mean_return < -0.0001:  # Negative trend
-                    trend_signals[tf_name] = 'BEARISH'
-                else:
-                    trend_signals[tf_name] = 'NEUTRAL'
-        
-        # Count trend signals
-        trend_counts = {
-            'BULLISH': 0,
-            'BEARISH': 0,
-            'NEUTRAL': 0
-        }
-        
-        for signal in trend_signals.values():
-            if signal in trend_counts:
-                trend_counts[signal] += 1
-        
-        total_tfs = len(trend_signals)
-        if total_tfs > 0:
-            bullish_pct = trend_counts['BULLISH'] / total_tfs
-            bearish_pct = trend_counts['BEARISH'] / total_tfs
-            
-            if bullish_pct > 0.6:
-                recommendation['trade_signal'] = 'BUY'
-                recommendation['confidence'] = min(0.9, bullish_pct)
-                recommendation['reasoning'].append(f"Bullish alignment across {bullish_pct:.0%} of timeframes")
-            elif bearish_pct > 0.6:
-                recommendation['trade_signal'] = 'SELL'
-                recommendation['confidence'] = min(0.9, bearish_pct)
-                recommendation['reasoning'].append(f"Bearish alignment across {bearish_pct:.0%} of timeframes")
-            else:
-                recommendation['trade_signal'] = 'HOLD'
-                recommendation['confidence'] = 0.3
-                recommendation['reasoning'].append(f"Mixed signals: {bullish_pct:.0%} bullish, {bearish_pct:.0%} bearish")
-        
-        # Adjust risk based on volatility consistency
-        vol_cv = consistency.get('volatility_cv', 0)
-        if vol_cv > 0.5:
-            recommendation['risk_adjustment'] *= 0.5
-            recommendation['reasoning'].append(f"High volatility inconsistency (CV: {vol_cv:.2f}) - reducing risk")
-        
-        # Check market regime
-        dominant_regime = consistency.get('dominant_regime', '')
-        if dominant_regime == 'trending':
-            recommendation['risk_adjustment'] *= 1.2
-            recommendation['reasoning'].append("Trending market - increasing position size")
-        elif dominant_regime == 'mean_reverting':
-            recommendation['risk_adjustment'] *= 0.8
-            recommendation['reasoning'].append("Mean-reverting market - reducing position size")
-        
-        recommendation['timeframe_analysis'] = {
-            'alignment_score': overall_alignment,
-            'trend_signals': trend_signals,
-            'dominant_regime': dominant_regime
-        }
-        
-        return recommendation
-
-# ==========================================
-# ADVANCED STATISTICAL ANALYZER (Enhanced)
+# ADVANCED STATISTICAL ANALYZER
 # ==========================================
 class AdvancedStatisticalAnalyzer:
-    """Enhanced statistical analysis for MT5 data"""
-    
-    def __init__(self):
-        self.mtf_analyzer = MultiTimeframeStatisticalAnalyzer()
+    """Advanced statistical analysis for MT5 data"""
     
     @staticmethod
     def analyze_return_distribution(returns):
@@ -940,6 +470,7 @@ class AdvancedStatisticalAnalyzer:
             'q1': np.percentile(returns, 25),
             'q3': np.percentile(returns, 75),
             'iqr': np.percentile(returns, 75) - np.percentile(returns, 25),
+            # CORRECTION: Uses 252*96 for M15 annualization
             'sharpe': np.mean(returns) / np.std(returns) * np.sqrt(252 * 96) if np.std(returns) > 0 else 0,
             'sortino': np.mean(returns) / np.std(returns[returns < 0]) * np.sqrt(252 * 96) if len(returns[returns < 0]) > 0 else 0
         }
@@ -965,15 +496,18 @@ class AdvancedStatisticalAnalyzer:
         stats['tail_asymmetry'] = abs(stats['left_tail_mean']) - abs(stats['right_tail_mean'])
         stats['tail_ratio'] = abs(stats['left_tail_mean'] / stats['right_tail_mean']) if stats['right_tail_mean'] != 0 else float('inf')
         
-        # Value at Risk and Expected Shortfall
-        var_95 = np.percentile(returns, 5)
-        var_99 = np.percentile(returns, 1)
+        # Value at Risk and Expected Shortfall - HISTORICAL METHOD + DAILY SCALING
+        # VaR on 15m timeframe
+        var_95_15m = np.percentile(returns, 5)
+        var_99_15m = np.percentile(returns, 1)
         
-        stats['var_95'] = var_95
-        stats['var_99'] = var_99
+        # Scale to Daily VaR (approximate using sqrt(T)) - 96 intervals per day
+        # Note: This implies "If I held this risk for a day"
+        stats['var_95'] = var_95_15m * np.sqrt(96)
+        stats['var_99'] = var_99_15m * np.sqrt(96)
         
-        stats['cvar_95'] = np.mean(returns[returns <= var_95]) if len(returns[returns <= var_95]) > 0 else stats['var_95']
-        stats['cvar_99'] = np.mean(returns[returns <= var_99]) if len(returns[returns <= var_99]) > 0 else stats['var_99']
+        stats['cvar_95'] = np.mean(returns[returns <= var_95_15m]) * np.sqrt(96) if len(returns[returns <= var_95_15m]) > 0 else stats['var_95']
+        stats['cvar_99'] = np.mean(returns[returns <= var_99_15m]) * np.sqrt(96) if len(returns[returns <= var_99_15m]) > 0 else stats['var_99']
         
         # Downside risk metrics
         downside_returns = returns[returns < 0]
@@ -1044,34 +578,142 @@ class AdvancedStatisticalAnalyzer:
         except:
             return 0
     
-    def analyze_multi_timeframe(self, symbol):
-        """Perform multi-timeframe statistical analysis"""
-        ProfessionalLogger.log("Performing multi-timeframe statistical analysis...", "TIMEFRAME", "STATS")
+    @staticmethod
+    def calculate_hurst_exponent(prices, method='rs'):
+        """Calculate Hurst exponent for market efficiency analysis"""
+        if len(prices) < 100:
+            return 0.5
         
-        # Fetch data for all timeframes
-        timeframe_data = self.mtf_analyzer.fetch_multi_timeframe_data(symbol, bars_per_tf=2000)
-        
-        if not timeframe_data:
-            ProfessionalLogger.log("No timeframe data available", "WARNING", "STATS")
-            return None
-        
-        # Compare timeframes
-        comparison = self.mtf_analyzer.compare_timeframes()
-        
-        # Generate report
-        report = self.mtf_analyzer.generate_comparison_report()
-        
-        # Get trading recommendation
-        recommendation = self.mtf_analyzer.get_trading_recommendation()
-        
-        return {
-            'timeframe_data': {k: len(v) for k, v in timeframe_data.items()},
-            'comparison': comparison,
-            'recommendation': recommendation,
-            'report': report
-        }
+        try:
+            # Convert to returns
+            returns = np.diff(np.log(prices))
+            
+            if method == 'rs':
+                # Rescaled Range method
+                n = len(returns)
+                r_s_values = []
+                n_values = []
+                
+                for window in range(10, n//2, n//20):
+                    if window < 10:
+                        continue
+                    
+                    # Calculate R/S for different window sizes
+                    num_windows = n // window
+                    if num_windows < 2:
+                        continue
+                    
+                    rs_values = []
+                    for i in range(num_windows):
+                        segment = returns[i*window:(i+1)*window]
+                        if len(segment) < 2:
+                            continue
+                        
+                        mean_segment = np.mean(segment)
+                        deviations = segment - mean_segment
+                        cumulative_dev = np.cumsum(deviations)
+                        
+                        r = np.max(cumulative_dev) - np.min(cumulative_dev)  # Range
+                        s = np.std(segment)  # Standard deviation
+                        
+                        if s > 0:
+                            rs_values.append(r / s)
+                    
+                    if rs_values:
+                        r_s_values.append(np.mean(rs_values))
+                        n_values.append(window)
+                
+                if len(r_s_values) < 3:
+                    return 0.5
+                
+                # Fit log(R/S) vs log(n)
+                log_rs = np.log(r_s_values)
+                log_n = np.log(n_values)
+                
+                hurst, _ = np.polyfit(log_n, log_rs, 1)
+                return hurst
+                
+            elif method == 'aggregate':
+                # Aggregate variance method
+                n = len(returns)
+                variances = []
+                scales = []
+                
+                for scale in range(2, n//4):
+                    m = n // scale
+                    if m < 2:
+                        continue
+                    
+                    aggregated = np.zeros(m)
+                    for i in range(m):
+                        aggregated[i] = np.sum(returns[i*scale:(i+1)*scale])
+                    
+                    variances.append(np.var(aggregated))
+                    scales.append(scale)
+                
+                if len(variances) < 3:
+                    return 0.5
+                
+                log_var = np.log(variances)
+                log_scale = np.log(scales)
+                
+                slope, _ = np.polyfit(log_scale, log_var, 1)
+                hurst = 1 + slope / 2
+                return hurst
+                
+            else:
+                return 0.5
+                
+        except Exception as e:
+            ProfessionalLogger.log(f"Hurst calculation error: {str(e)}", "WARNING", "STATS")
+            return 0.5
     
-    def calculate_market_regime(self, data):
+    @staticmethod
+    def calculate_garch_volatility(returns, p=1, q=1):
+        """Calculate GARCH volatility with robust error handling"""
+        if len(returns) < 100:
+            return np.std(returns) if len(returns) > 0 else 0.001
+        
+        try:
+            # Clean returns - remove NaN and infinite values
+            clean_returns = returns.copy()
+            clean_returns = clean_returns[~np.isnan(clean_returns)]
+            clean_returns = clean_returns[~np.isinf(clean_returns)]
+            clean_returns = clean_returns[np.isfinite(clean_returns)]
+            
+            if len(clean_returns) < 50:
+                return np.std(clean_returns) if len(clean_returns) > 0 else 0.001
+            
+            # Scale returns for better numerical stability (x100)
+            scaled_returns = clean_returns * 100.0
+            
+            # Check for all zeros or constant values
+            if np.std(scaled_returns) < 1e-10:
+                return np.std(clean_returns)
+            
+            # Fit GARCH model
+            model = arch_model(scaled_returns, vol='Garch', p=p, q=q, dist='normal')
+            result = model.fit(disp='off', show_warning=False, options={'maxiter': 200})
+            
+            # Get conditional volatility
+            conditional_vol = result.conditional_volatility
+            
+            # Return last value, scaled back
+            if len(conditional_vol) > 0:
+                return conditional_vol[-1] / 100
+            else:
+                return np.std(clean_returns)
+            
+        except Exception as e:
+            # Fall back to simple volatility
+            clean_returns = returns[~np.isnan(returns) & ~np.isinf(returns)]
+            if len(clean_returns) > 0:
+                return np.std(clean_returns)
+            else:
+                return 0.001
+    
+    @staticmethod
+    def calculate_market_regime(data):
         """Determine market regime based on statistical properties"""
         if len(data) < Config.MIN_SAMPLES_FOR_STATS:
             return {"regime": "unknown", "confidence": 0}
@@ -1086,7 +728,7 @@ class AdvancedStatisticalAnalyzer:
         volatility = np.std(returns)
         mean_return = np.mean(returns)
         sharpe = mean_return / volatility if volatility > 0 else 0
-        hurst = self.calculate_hurst_exponent_simple(data['close'].values[-500:])
+        hurst = AdvancedStatisticalAnalyzer.calculate_hurst_exponent(data['close'].values[-500:])
         autocorr = np.corrcoef(returns[:-1], returns[1:])[0, 1] if len(returns) > 1 else 0
         
         # Determine regime
@@ -1140,158 +782,435 @@ class AdvancedStatisticalAnalyzer:
         }
     
     @staticmethod
-    def calculate_hurst_exponent_simple(prices):
-        """Simple Hurst exponent calculation"""
-        if len(prices) < 100:
-            return 0.5
+    def calculate_tail_risk(returns, confidence=0.95):
+        """Calculate tail risk metrics"""
+        if len(returns) < 100:
+            return {"error": "Insufficient data"}
+        
+        # Sort returns
+        sorted_returns = np.sort(returns)
+        n = len(sorted_returns)
+        
+        # Hill estimator for tail index
+        k = max(10, int(n * (1 - confidence)))
+        tail_data = sorted_returns[-k:]
+        
+        if len(tail_data) < 10:
+            return {"error": "Insufficient tail data"}
+        
+        # Calculate Hill estimator
+        log_tail = np.log(tail_data / tail_data[0])
+        hill_estimator = 1 / np.mean(log_tail) if np.mean(log_tail) > 0 else 0
+        
+        # Extreme Value Theory metrics
+        var_extreme = np.percentile(returns, (1 - confidence) * 100)
+        cvar_extreme = np.mean(returns[returns <= var_extreme])
+        
+        # Tail dependence (simplified)
+        left_tail = returns[returns < np.percentile(returns, 10)]
+        right_tail = returns[returns > np.percentile(returns, 90)]
+        
+        return {
+            "tail_index": hill_estimator,
+            "var_extreme": var_extreme,
+            "cvar_extreme": cvar_extreme,
+            "left_tail_size": len(left_tail),
+            "right_tail_size": len(right_tail),
+            "tail_asymmetry": abs(np.mean(left_tail)) - abs(np.mean(right_tail)) if len(right_tail) > 0 else 0
+        }
+    
+    @staticmethod
+    def calculate_correlation_structure(data):
+        """Calculate correlation structure of price features"""
+        if len(data) < 100:
+            return {"error": "Insufficient data"}
         
         try:
-            # Convert to returns
-            returns = np.diff(np.log(prices))
+            # Calculate returns for different time periods
+            returns_1 = data['close'].pct_change(1).dropna()
+            returns_5 = data['close'].pct_change(5).dropna()
+            returns_10 = data['close'].pct_change(10).dropna()
+            returns_20 = data['close'].pct_change(20).dropna()
             
-            # R/S method
-            n = len(returns)
-            r_s_values = []
-            n_values = []
+            # Align lengths
+            min_len = min(len(returns_1), len(returns_5), len(returns_10), len(returns_20))
+            returns_1 = returns_1[-min_len:]
+            returns_5 = returns_5[-min_len:]
+            returns_10 = returns_10[-min_len:]
+            returns_20 = returns_20[-min_len:]
             
-            for window in range(10, n//4, n//40):
-                if window < 10:
-                    continue
-                
-                num_windows = n // window
-                if num_windows < 2:
-                    continue
-                
-                rs_values = []
-                for i in range(num_windows):
-                    segment = returns[i*window:(i+1)*window]
-                    if len(segment) < 2:
-                        continue
-                    
-                    mean_segment = np.mean(segment)
-                    deviations = segment - mean_segment
-                    cumulative_dev = np.cumsum(deviations)
-                    
-                    r = np.max(cumulative_dev) - np.min(cumulative_dev)
-                    s = np.std(segment)
-                    
-                    if s > 0:
-                        rs_values.append(r / s)
-                
-                if rs_values:
-                    r_s_values.append(np.mean(rs_values))
-                    n_values.append(window)
+            # Create correlation matrix
+            returns_matrix = np.column_stack([returns_1, returns_5, returns_10, returns_20])
+            correlation_matrix = np.corrcoef(returns_matrix.T)
             
-            if len(r_s_values) < 3:
-                return 0.5
+            # Eigenvalue decomposition
+            eigenvalues, eigenvectors = np.linalg.eig(correlation_matrix)
             
-            # Fit log(R/S) vs log(n)
-            log_rs = np.log(r_s_values)
-            log_n = np.log(n_values)
+            # Market correlation (first eigenvalue dominance)
+            market_correlation = eigenvalues[0] / np.sum(eigenvalues) if np.sum(eigenvalues) > 0 else 0
             
-            hurst, _ = np.polyfit(log_n, log_rs, 1)
-            return hurst
+            return {
+                "correlation_matrix": correlation_matrix.tolist(),
+                "eigenvalues": eigenvalues.tolist(),
+                "market_correlation": market_correlation,
+                "correlation_strength": np.mean(np.abs(correlation_matrix - np.eye(correlation_matrix.shape[0])))
+            }
             
-        except:
-            return 0.5
+        except Exception as e:
+            ProfessionalLogger.log(f"Correlation analysis error: {str(e)}", "WARNING", "STATS")
+            return {"error": str(e)}
+    
+    @staticmethod
+    def bootstrap_analysis(returns, n_iterations=1000):
+        """Bootstrap analysis for confidence intervals"""
+        if len(returns) < 50:
+            return {"error": "Insufficient data"}
+        
+        bootstrap_stats = {
+            'mean': [],
+            'std': [],
+            'sharpe': [],
+            'var_95': [],
+            'skewness': [],
+            'kurtosis': []
+        }
+        
+        n = len(returns)
+        for _ in range(n_iterations):
+            # Resample with replacement
+            sample_idx = np.random.choice(n, n, replace=True)
+            sample = returns[sample_idx]
+            
+            # Calculate statistics
+            bootstrap_stats['mean'].append(np.mean(sample))
+            bootstrap_stats['std'].append(np.std(sample))
+            
+            if np.std(sample) > 0:
+                bootstrap_stats['sharpe'].append(np.mean(sample) / np.std(sample) * np.sqrt(252))
+            
+            bootstrap_stats['var_95'].append(np.percentile(sample, 5))
+            bootstrap_stats['skewness'].append(skew(sample))
+            bootstrap_stats['kurtosis'].append(kurtosis(sample))
+        
+        # Calculate confidence intervals
+        ci_results = {}
+        for key, values in bootstrap_stats.items():
+            if len(values) > 0:
+                ci_results[f'{key}_mean'] = np.mean(values)
+                ci_results[f'{key}_ci_lower'] = np.percentile(values, 2.5)
+                ci_results[f'{key}_ci_upper'] = np.percentile(values, 97.5)
+                ci_results[f'{key}_std'] = np.std(values)
+        
+        return ci_results
 
 # ==========================================
-# PROFESSIONAL FEATURE ENGINEERING (Enhanced)
+# PROFESSIONAL RISK METRICS
+# ==========================================
+class ProfessionalRiskMetrics:
+    """Advanced risk metrics with statistical analysis"""
+    
+    @staticmethod
+    def calculate_risk_metrics(returns, prices=None):
+        """Calculate comprehensive risk metrics"""
+        if len(returns) < Config.MIN_SAMPLES_FOR_STATS:
+            return {"error": "Insufficient data"}
+        
+        returns = np.array(returns)
+        returns = returns[~np.isnan(returns)]
+        
+        metrics = {}
+        
+        # Basic risk metrics
+        metrics['volatility'] = np.std(returns)
+        metrics['downside_deviation'] = np.std(returns[returns < 0]) if len(returns[returns < 0]) > 0 else 0
+        
+        # Value at Risk
+        metrics['var_95'] = np.percentile(returns, 5)
+        metrics['var_99'] = np.percentile(returns, 1)
+        
+        # Conditional VaR (Expected Shortfall)
+        metrics['cvar_95'] = np.mean(returns[returns <= metrics['var_95']]) if len(returns[returns <= metrics['var_95']]) > 0 else metrics['var_95']
+        metrics['cvar_99'] = np.mean(returns[returns <= metrics['var_99']]) if len(returns[returns <= metrics['var_99']]) > 0 else metrics['var_99']
+        
+        # Performance ratios
+        if metrics['volatility'] > 0:
+            metrics['sharpe'] = np.mean(returns) / metrics['volatility'] * np.sqrt(252)
+        else:
+            metrics['sharpe'] = 0
+        
+        if metrics['downside_deviation'] > 0:
+            metrics['sortino'] = np.mean(returns) / metrics['downside_deviation'] * np.sqrt(252)
+        else:
+            metrics['sortino'] = 0
+        
+        # Maximum Drawdown
+        if prices is not None and len(prices) > 0:
+            cumulative = np.cumprod(1 + returns)
+            peak = np.maximum.accumulate(cumulative)
+            drawdown = (peak - cumulative) / peak
+            metrics['max_drawdown'] = np.max(drawdown)
+            metrics['avg_drawdown'] = np.mean(drawdown[drawdown > 0]) if len(drawdown[drawdown > 0]) > 0 else 0
+        else:
+            metrics['max_drawdown'] = 0
+            metrics['avg_drawdown'] = 0
+        
+        # Tail risk metrics
+        metrics['skewness'] = skew(returns)
+        metrics['kurtosis'] = kurtosis(returns)
+        metrics['tail_ratio'] = abs(np.mean(returns[returns < np.percentile(returns, 5)])) / \
+                                abs(np.mean(returns[returns > np.percentile(returns, 95)])) \
+                                if len(returns[returns > np.percentile(returns, 95)]) > 0 else float('inf')
+        
+        # Risk-adjusted return metrics
+        if metrics['max_drawdown'] > 0:
+            metrics['calmar'] = np.mean(returns) * 252 / metrics['max_drawdown']
+            metrics['recovery_factor'] = np.sum(returns) / metrics['max_drawdown'] if metrics['max_drawdown'] > 0 else float('inf')
+        else:
+            metrics['calmar'] = float('inf')
+            metrics['recovery_factor'] = float('inf')
+        
+        # Omega ratio
+        threshold = 0
+        gains = returns[returns > threshold] - threshold
+        losses = threshold - returns[returns <= threshold]
+        
+        if len(losses) > 0 and np.sum(losses) > 0:
+            metrics['omega'] = np.sum(gains) / np.sum(losses)
+        else:
+            metrics['omega'] = float('inf')
+        
+        # Ulcer index
+        if prices is not None and len(prices) > 14:
+            squared_drawdowns = drawdown ** 2
+            metrics['ulcer_index'] = np.sqrt(np.mean(squared_drawdowns[-14:])) if len(squared_drawdowns) >= 14 else 0
+        else:
+            metrics['ulcer_index'] = 0
+        
+        return metrics
+    
+    @staticmethod
+    def calculate_position_risk(position_size, entry_price, stop_loss, current_price):
+        """Calculate position-specific risk metrics"""
+        risk_per_share = abs(entry_price - stop_loss)
+        risk_amount = position_size * risk_per_share
+        
+        current_risk = abs(current_price - stop_loss) * position_size
+        risk_ratio = current_risk / risk_amount if risk_amount > 0 else 0
+        
+        return {
+            'risk_per_share': risk_per_share,
+            'risk_amount': risk_amount,
+            'current_risk': current_risk,
+            'risk_ratio': risk_ratio,
+            'stop_distance_pct': risk_per_share / entry_price * 100
+        }
+    
+    @staticmethod
+    def calculate_portfolio_risk(positions, correlation_matrix=None):
+        """Calculate portfolio-level risk metrics"""
+        if not positions:
+            return {"total_risk": 0, "diversification_benefit": 0}
+        
+        # Calculate individual position risks
+        position_risks = []
+        position_values = []
+        
+        for pos in positions:
+            if 'risk_amount' in pos:
+                position_risks.append(pos['risk_amount'])
+                position_values.append(pos.get('position_value', pos['risk_amount'] * 10))
+        
+        if not position_risks:
+            return {"total_risk": 0, "diversification_benefit": 0}
+        
+        # Simple sum (undiversified risk)
+        undiversified_risk = np.sum(position_risks)
+        
+        # If we have correlation matrix, calculate diversified risk
+        if correlation_matrix is not None and len(correlation_matrix) == len(position_risks):
+            # Convert to numpy arrays
+            risks = np.array(position_risks)
+            corr = np.array(correlation_matrix)
+            
+            # Calculate portfolio variance
+            portfolio_variance = np.dot(risks, np.dot(corr, risks))
+            diversified_risk = np.sqrt(portfolio_variance)
+        else:
+            # Assume zero correlation for conservative estimate
+            diversified_risk = np.sqrt(np.sum(np.array(position_risks) ** 2))
+        
+        diversification_benefit = (undiversified_risk - diversified_risk) / undiversified_risk * 100 \
+            if undiversified_risk > 0 else 0
+        
+        return {
+            'total_risk': diversified_risk,
+            'undiversified_risk': undiversified_risk,
+            'diversification_benefit': diversification_benefit,
+            'num_positions': len(positions),
+            'avg_position_risk': np.mean(position_risks) if position_risks else 0,
+            'max_position_risk': np.max(position_risks) if position_risks else 0
+        }
+
+# ==========================================
+# DATA QUALITY CHECKER WITH STATISTICAL TESTS
+# ==========================================
+class ProfessionalDataQualityChecker:
+    """Enhanced data quality validation with statistical tests"""
+    
+    @staticmethod
+    def check_data_quality(df):
+        """Comprehensive data quality assessment"""
+        if df is None or len(df) == 0:
+            return 0.0, {"error": "Empty dataframe"}
+        
+        scores = []
+        diagnostics = {}
+        
+        # 1. Missing values check
+        missing_ratio = df.isnull().sum().sum() / (df.shape[0] * df.shape[1])
+        missing_score = max(0, 1 - missing_ratio * 5)  # Penalize heavily
+        scores.append(missing_score)
+        diagnostics['missing_ratio'] = missing_ratio
+        
+        # 2. Chronological order check
+        if 'time' in df.columns:
+            is_sorted = df['time'].is_monotonic_increasing
+            sort_score = 1.0 if is_sorted else 0.3
+            scores.append(sort_score)
+            diagnostics['is_chronological'] = bool(is_sorted)
+        
+        # 3. Price sanity checks
+        price_checks = {}
+        for price_col in ['open', 'high', 'low', 'close']:
+            if price_col in df.columns:
+                col_data = df[price_col]
+                
+                # Check for zero or negative prices
+                has_invalid = (col_data <= 0).any()
+                price_checks[f'{price_col}_valid'] = not has_invalid
+                
+                # Check for extreme outliers
+                q1 = col_data.quantile(0.01)
+                q3 = col_data.quantile(0.99)
+                iqr = q3 - q1
+                outliers = ((col_data < (q1 - 3 * iqr)) | (col_data > (q3 + 3 * iqr))).sum()
+                outlier_ratio = outliers / len(col_data)
+                price_checks[f'{price_col}_outliers'] = outlier_ratio
+        
+        # Calculate price sanity score
+        valid_checks = sum(price_checks.values()) if 'close_valid' in price_checks else 0
+        total_checks = len([k for k in price_checks.keys() if 'valid' in k])
+        price_score = valid_checks / total_checks if total_checks > 0 else 0.5
+        
+        scores.append(price_score)
+        diagnostics['price_checks'] = price_checks
+        
+        # 4. Volume checks (if available)
+        if 'tick_volume' in df.columns:
+            volume = df['tick_volume']
+            
+            # Check for zero volume
+            zero_volume_ratio = (volume == 0).sum() / len(volume)
+            volume_score = max(0, 1 - zero_volume_ratio * 2)
+            
+            # Check for volume spikes
+            volume_ma = volume.rolling(20).mean()
+            volume_ratio = volume / volume_ma
+            spike_ratio = (volume_ratio > 5).sum() / len(volume)
+            volume_score *= max(0.5, 1 - spike_ratio)
+            
+            scores.append(volume_score)
+            diagnostics['volume_checks'] = {
+                'zero_volume_ratio': zero_volume_ratio,
+                'spike_ratio': spike_ratio
+            }
+        
+        # 5. Statistical consistency checks
+        if 'close' in df.columns and len(df) > 100:
+            returns = df['close'].pct_change().dropna()
+            
+            # Check return distribution
+            return_stats = AdvancedStatisticalAnalyzer.analyze_return_distribution(returns.values)
+            
+            # Score based on statistical sanity
+            stat_score = 1.0
+            
+            # Penalize extreme kurtosis
+            if 'kurtosis' in return_stats:
+                kurt = return_stats['kurtosis']
+                if abs(kurt) > 10:  # Extremely fat tails
+                    stat_score *= 0.7
+                elif abs(kurt) > 5:  # Fat tails
+                    stat_score *= 0.9
+            
+            # Penalize extreme skewness
+            if 'skewness' in return_stats:
+                skew_val = return_stats['skewness']
+                if abs(skew_val) > 2:  # Highly skewed
+                    stat_score *= 0.8
+            
+            scores.append(stat_score)
+            diagnostics['return_stats'] = return_stats
+        
+        # 6. Gap analysis
+        if 'time' in df.columns and len(df) > 10:
+            time_diffs = np.diff(df['time'].values)
+            avg_time_diff = np.mean(time_diffs)
+            time_std = np.std(time_diffs)
+            
+            # Check for time gaps
+            gap_threshold = avg_time_diff * 3
+            gaps = (time_diffs > gap_threshold).sum()
+            gap_ratio = gaps / len(time_diffs)
+            
+            gap_score = max(0, 1 - gap_ratio * 3)
+            scores.append(gap_score)
+            
+            diagnostics['time_gaps'] = {
+                'avg_time_diff': avg_time_diff,
+                'time_std': time_std,
+                'gap_count': int(gaps),
+                'gap_ratio': gap_ratio
+            }
+        
+        # 7. Freshness check
+        if 'time' in df.columns:
+            latest_time = pd.to_datetime(df['time'].max(), unit='s')
+            current_time = datetime.now()
+            hours_old = (current_time - latest_time).total_seconds() / 3600
+            
+            # Score based on data freshness
+            if hours_old < 1:
+                freshness_score = 1.0
+            elif hours_old < 6:
+                freshness_score = 0.9
+            elif hours_old < 24:
+                freshness_score = 0.7
+            else:
+                freshness_score = 0.5
+            
+            scores.append(freshness_score)
+            diagnostics['freshness'] = {
+                'latest_time': latest_time.isoformat(),
+                'hours_old': hours_old
+            }
+        
+        # Calculate overall score
+        overall_score = np.mean(scores) if scores else 0.5
+        
+        return overall_score, diagnostics
+
+# ==========================================
+# PROFESSIONAL FEATURE ENGINEERING WITH STATISTICS
 # ==========================================
 class ProfessionalFeatureEngine:
     def __init__(self):
         self.scaler = RobustScaler()
         self.stat_analyzer = AdvancedStatisticalAnalyzer()
+        self.risk_metrics = ProfessionalRiskMetrics()
         
-    def calculate_multi_timeframe_features(self, symbol):
-        """Calculate features across multiple timeframes"""
-        mtf_features = {}
-        
-        for tf_name, tf_enum in Config.COMPARISON_TIMEFRAMES:
-            try:
-                # Fetch data for this timeframe
-                rates = mt5.copy_rates_from_pos(symbol, tf_enum, 0, 500)
-                if rates is None or len(rates) < 100:
-                    continue
-                
-                df = pd.DataFrame(rates)
-                
-                # Calculate basic features for this timeframe
-                features = self.calculate_basic_timeframe_features(df, tf_name)
-                mtf_features[tf_name] = features
-                
-            except Exception as e:
-                ProfessionalLogger.log(f"Error calculating {tf_name} features: {str(e)}", "WARNING", "FEATURE_ENGINE")
-        
-        return mtf_features
-    
-    def calculate_basic_timeframe_features(self, df, timeframe_name):
-        """Calculate basic features for a specific timeframe"""
-        if df is None or len(df) < 50:
-            return {}
-        
-        try:
-            features = {}
-            
-            # Price features
-            features['close'] = float(df['close'].iloc[-1])
-            features['returns_1'] = float(df['close'].pct_change(1).iloc[-1] if len(df) > 1 else 0)
-            features['returns_5'] = float(df['close'].pct_change(5).iloc[-1] if len(df) > 5 else 0)
-            features['returns_20'] = float(df['close'].pct_change(20).iloc[-1] if len(df) > 20 else 0)
-            
-            # Volatility
-            returns = df['close'].pct_change().dropna()
-            if len(returns) > 0:
-                features['volatility'] = float(np.std(returns))
-                features['realized_vol'] = float(np.std(returns) * np.sqrt(252 * 96))
-            
-            # Range features
-            df['range'] = df['high'] - df['low']
-            features['avg_range'] = float(df['range'].mean() if len(df) > 0 else 0)
-            features['range_ratio'] = float(df['range'].iloc[-1] / df['close'].iloc[-1] if df['close'].iloc[-1] > 0 else 0)
-            
-            # Simple moving averages
-            if len(df) >= 20:
-                features['sma_20'] = float(df['close'].rolling(20).mean().iloc[-1])
-                features['price_vs_sma_20'] = float(df['close'].iloc[-1] / features['sma_20'] - 1 if features['sma_20'] > 0 else 0)
-            
-            if len(df) >= 50:
-                features['sma_50'] = float(df['close'].rolling(50).mean().iloc[-1])
-                features['price_vs_sma_50'] = float(df['close'].iloc[-1] / features['sma_50'] - 1 if features['sma_50'] > 0 else 0)
-            
-            # High/Low proximity
-            features['distance_to_high_20'] = float((df['high'].rolling(20).max().iloc[-1] - df['close'].iloc[-1]) / df['close'].iloc[-1] if df['close'].iloc[-1] > 0 else 0)
-            features['distance_to_low_20'] = float((df['close'].iloc[-1] - df['low'].rolling(20).min().iloc[-1]) / df['close'].iloc[-1] if df['close'].iloc[-1] > 0 else 0)
-            
-            # Trend indicators
-            if len(df) >= 10:
-                # Simple trend: 10-bar return
-                features['trend_10'] = float(df['close'].iloc[-1] / df['close'].iloc[-10] - 1 if len(df) >= 10 else 0)
-                
-                # Momentum
-                features['momentum_5'] = float(df['close'].iloc[-1] / df['close'].iloc[-5] - 1 if len(df) >= 5 else 0)
-            
-            # Volume features (if available)
-            if 'tick_volume' in df.columns:
-                volume = df['tick_volume']
-                features['volume'] = float(volume.iloc[-1])
-                if len(volume) >= 20:
-                    features['volume_sma_20'] = float(volume.rolling(20).mean().iloc[-1])
-                    features['volume_ratio'] = float(volume.iloc[-1] / features['volume_sma_20'] if features['volume_sma_20'] > 0 else 1)
-            
-            # Timeframe-specific metadata
-            features['timeframe'] = timeframe_name
-            features['sample_size'] = len(df)
-            features['timestamp'] = datetime.now().isoformat()
-            
-            return features
-            
-        except Exception as e:
-            ProfessionalLogger.log(f"Error in timeframe features: {str(e)}", "ERROR", "FEATURE_ENGINE")
-            return {}
-    
     def calculate_features(self, df):
-        """Calculate comprehensive features for primary timeframe"""
+        """Calculate features with advanced statistical analysis"""
         df = df.copy()
         
         # Basic price features
@@ -1299,12 +1218,29 @@ class ProfessionalFeatureEngine:
         df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
         df['hl_ratio'] = (df['high'] - df['low']) / df['close']
         df['co_ratio'] = (df['close'] - df['open']) / df['open']
+        df['hlc3'] = (df['high'] + df['low'] + df['close']) / 3
         
-        # Moving averages
-        for period in [Config.FAST_MA, Config.MEDIUM_MA, Config.SLOW_MA]:
+        # ==========================================
+        # POINT 1: Technical indicator periods using Config
+        # ==========================================
+        # Moving averages using Config values
+        ma_periods = [Config.FAST_MA, Config.MEDIUM_MA, Config.SLOW_MA]
+        if hasattr(Config, 'TREND_MA') and Config.TREND_MA:
+            ma_periods.append(Config.TREND_MA)
+            
+        for period in ma_periods:
             df[f'sma_{period}'] = df['close'].rolling(period).mean()
             df[f'ema_{period}'] = df['close'].ewm(span=period, adjust=False).mean()
             df[f'price_to_sma_{period}'] = df['close'] / df[f'sma_{period}'].replace(0, 1) - 1
+            
+            if len(df) > period * 2:
+                try:
+                    price_deviation = df['close'] - df[f'sma_{period}']
+                    rolling_mean = price_deviation.rolling(period).mean()
+                    rolling_std = price_deviation.rolling(period).std().replace(0, 1)
+                    df[f'price_deviation_{period}_z'] = (price_deviation - rolling_mean) / rolling_std
+                except:
+                    df[f'price_deviation_{period}_z'] = 0
         
         # Volatility features
         df['tr'] = np.maximum(
@@ -1318,17 +1254,23 @@ class ProfessionalFeatureEngine:
         df['atr_percent'] = df['atr'] / df['close'].replace(0, 1)
         df['volatility'] = df['returns'].rolling(20).std()
         
-        # RSI
+        df['realized_volatility_5'] = df['returns'].rolling(5).std() * np.sqrt(252)
+        df['realized_volatility_20'] = df['returns'].rolling(20).std() * np.sqrt(252)
+        df['volatility_ratio'] = df['realized_volatility_5'] / df['realized_volatility_20'].replace(0, 1)
+        
+        # RSI using Config.RSI_PERIOD
         try:
             delta = df['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(Config.RSI_PERIOD).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(Config.RSI_PERIOD).mean()
             rs = gain / loss.replace(0, 1)
             df['rsi'] = 100 - (100 / (1 + rs))
+            df['rsi_normalized'] = (df['rsi'] - 50) / 50
         except:
             df['rsi'] = 50
+            df['rsi_normalized'] = 0
         
-        # MACD
+        # MACD (standard periods for MACD)
         try:
             ema_12 = df['close'].ewm(span=12, adjust=False).mean()
             ema_26 = df['close'].ewm(span=26, adjust=False).mean()
@@ -1340,10 +1282,13 @@ class ProfessionalFeatureEngine:
             df['macd_signal'] = 0
             df['macd_hist'] = 0
         
-        # Bollinger Bands
+        # ==========================================
+        # POINT 2: Bollinger Bands using Config.BB_PERIOD and Config.BB_STD
+        # ==========================================
         try:
-            bb_period = Config.BB_PERIOD
-            bb_std = Config.BB_STD
+            # FIXED: Use Config values directly
+            bb_period = Config.BB_PERIOD  # This is 20 from your Config
+            bb_std = Config.BB_STD  # This is 2.0 from your Config
             
             sma_bb = df['close'].rolling(bb_period).mean()
             std_bb = df['close'].rolling(bb_period).std().replace(0, 1)
@@ -1351,49 +1296,986 @@ class ProfessionalFeatureEngine:
             df['bb_lower'] = sma_bb - (std_bb * bb_std)
             df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / sma_bb.replace(0, 1)
             df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower']).replace(0, 1)
-        except:
+        except Exception as e:
+            # FIXED: Better error handling
+            ProfessionalLogger.log(f"Bollinger Bands calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
             df['bb_upper'] = df['close']
             df['bb_lower'] = df['close']
             df['bb_width'] = 0
             df['bb_position'] = 0.5
         
-        # Fill NaN values
-        df = df.fillna(0)
+        # ADX if configured
+        if hasattr(Config, 'USE_MARKET_REGIME') and Config.USE_MARKET_REGIME:
+            try:
+                # ADX calculation
+                df['plus_dm'] = np.where((df['high'] - df['high'].shift(1)) > (df['low'].shift(1) - df['low']), 
+                                        np.maximum(df['high'] - df['high'].shift(1), 0), 0)
+                df['minus_dm'] = np.where((df['low'].shift(1) - df['low']) > (df['high'] - df['high'].shift(1)), 
+                                         np.maximum(df['low'].shift(1) - df['low'], 0), 0)
+                
+                tr = df['tr'].rolling(Config.ADX_PERIOD).mean()
+                plus_di = 100 * (df['plus_dm'].rolling(Config.ADX_PERIOD).mean() / tr.replace(0, 1))
+                minus_di = 100 * (df['minus_dm'].rolling(Config.ADX_PERIOD).mean() / tr.replace(0, 1))
+                
+                dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1)
+                df['adx'] = dx.rolling(Config.ADX_PERIOD).mean()
+                
+                # Market regime based on ADX
+                df['trend_strength'] = 0  # 0=sideways, 1=trending, 2=strong trend
+                df['trend_strength'] = np.where(df['adx'] > Config.ADX_STRONG_TREND_THRESHOLD, 2,
+                                               np.where(df['adx'] > Config.ADX_TREND_THRESHOLD, 1, 0))
+            except:
+                df['adx'] = 20
+                df['trend_strength'] = 0
+        
+        # Momentum indicators
+        momentum_periods = [3, 5, 10, 20]
+        for period in momentum_periods:
+            df[f'momentum_{period}'] = df['close'].pct_change(period)
+            shifted_close = df['close'].shift(period).replace(0, 1)
+            df[f'roc_{period}'] = (df['close'] - df['close'].shift(period)) / shifted_close
+        
+        # Statistical features
+        try:
+            df['returns_skew_20'] = df['returns'].rolling(20).apply(lambda x: skew(x) if len(x[x == x]) > 10 else 0, raw=True)
+            df['returns_kurtosis_20'] = df['returns'].rolling(20).apply(lambda x: kurtosis(x) if len(x[x == x]) > 10 else 0, raw=True)
+        except:
+            df['returns_skew_20'] = 0
+            df['returns_kurtosis_20'] = 0
+        
+        # Volume features
+        if 'tick_volume' in df.columns:
+            df['volume_sma'] = df['tick_volume'].rolling(20).mean()
+            df['volume_ratio'] = df['tick_volume'] / df['volume_sma'].replace(0, 1)
+        else:
+            df['volume_sma'] = 0
+            df['volume_ratio'] = 1
+        
+        # Time features with session awareness
+        if 'time' in df.columns:
+            try:
+                df['datetime'] = pd.to_datetime(df['time'], unit='s')
+                df['hour'] = df['datetime'].dt.hour
+                df['day_of_week'] = df['datetime'].dt.dayofweek
+                df['day_of_month'] = df['datetime'].dt.day
+                df['month'] = df['datetime'].dt.month
+                
+                # Cyclical encoding
+                df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
+                df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
+                df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
+                df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
+                df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
+                df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
+                
+                # Session flags based on Config
+                if Config.SESSION_AWARE_TRADING:
+                    # London session
+                    df['in_london_session'] = ((df['hour'] >= Config.LONDON_OPEN_HOUR) & 
+                                               (df['hour'] < Config.LONDON_CLOSE_HOUR)).astype(int)
+                    # NY session
+                    df['in_ny_session'] = ((df['hour'] >= Config.NY_OPEN_HOUR) & 
+                                           (df['hour'] < Config.NY_CLOSE_HOUR)).astype(int)
+                    # London-NY overlap (most active)
+                    df['in_overlap_session'] = ((df['hour'] >= Config.NY_OPEN_HOUR) & 
+                                                (df['hour'] < Config.LONDON_CLOSE_HOUR)).astype(int)
+                    # Avoid Asian session
+                    df['avoid_asia_session'] = ((df['hour'] >= 0) & (df['hour'] < 7)).astype(int)
+                    
+                    # Good trading hours (combine sessions)
+                    df['good_trading_hours'] = (df['in_london_session'] | df['in_ny_session']).astype(int)
+                    
+                    # Avoid Monday first hour and Friday last hours
+                    if Config.AVOID_MONDAY_FIRST_HOUR:
+                        df['avoid_monday_hour'] = ((df['day_of_week'] == 0) & (df['hour'] < 1)).astype(int)
+                    
+                    if Config.AVOID_FRIDAY_LAST_HOURS:
+                        df['avoid_friday_hours'] = ((df['day_of_week'] == 4) & (df['hour'] >= 20)).astype(int)
+                    
+            except:
+                # Default values on error
+                df['hour'] = 12
+                df['day_of_week'] = 2
+                df['month'] = 1
+                df['hour_sin'] = 0
+                df['hour_cos'] = 1
+                df['day_sin'] = 0
+                df['day_cos'] = 1
+                df['month_sin'] = 0
+                df['month_cos'] = 1
+                
+                if Config.SESSION_AWARE_TRADING:
+                    df['in_london_session'] = 0
+                    df['in_ny_session'] = 0
+                    df['in_overlap_session'] = 0
+                    df['avoid_asia_session'] = 0
+                    df['good_trading_hours'] = 1
+        else:
+            df['hour'] = 12
+            df['day_of_week'] = 2
+            df['month'] = 1
+            df['hour_sin'] = 0
+            df['hour_cos'] = 1
+            df['day_sin'] = 0
+            df['day_cos'] = 1
+            df['month_sin'] = 0
+            df['month_cos'] = 1
+            
+            if Config.SESSION_AWARE_TRADING:
+                df['in_london_session'] = 0
+                df['in_ny_session'] = 0
+                df['in_overlap_session'] = 0
+                df['avoid_asia_session'] = 0
+                df['good_trading_hours'] = 1
+        
+        # Advanced statistical features using Config
+        n = len(df)
+        
+        # GARCH volatility using Config.GARCH_VOL_PERIOD
+        df['garch_volatility'] = 0
+        df['garch_vol_ratio'] = 0
+        garch_window = Config.GARCH_VOL_PERIOD  # FIXED: Use Config directly
+        if n > garch_window:
+            try:
+                window_returns = df['returns'].iloc[-garch_window:].values
+                window_returns = window_returns[~np.isnan(window_returns) & ~np.isinf(window_returns)]
+                if len(window_returns) > garch_window // 2:
+                    garch_vol = self.stat_analyzer.calculate_garch_volatility(
+                        window_returns, 
+                        p=Config.GARCH_P,  # FIXED: Use Config directly
+                        q=Config.GARCH_Q   # FIXED: Use Config directly
+                    )
+                    df.loc[df.index[-1], 'garch_volatility'] = garch_vol
+                    if df['volatility'].iloc[-1] > 0:
+                        df.loc[df.index[-1], 'garch_vol_ratio'] = garch_vol / df['volatility'].iloc[-1]
+            except Exception as e:
+                ProfessionalLogger.log(f"GARCH calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
+                pass
+        
+        # ==========================================
+        # POINT 3: Hurst exponent thresholds using Config
+        # ==========================================
+        df['hurst_exponent'] = 0.5
+        hurst_window = Config.HURST_WINDOW  # FIXED: Use Config directly
+        if n > hurst_window:
+            try:
+                window_prices = df['close'].iloc[-hurst_window:].values
+                hurst = self.stat_analyzer.calculate_hurst_exponent(window_prices)
+                df.loc[df.index[-1], 'hurst_exponent'] = hurst
+            except Exception as e:
+                ProfessionalLogger.log(f"Hurst exponent calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
+                pass
+        
+        # Market regime encoding using Config thresholds
+        df['regime_encoded'] = 0
+        if 'hurst_exponent' in df.columns:
+            hurst = df['hurst_exponent'].iloc[-1]
+            
+            # FIXED: Use Config thresholds directly
+            trending_thresh = Config.HURST_TRENDING_THRESHOLD
+            meanreverting_thresh = Config.HURST_MEANREVERTING_THRESHOLD
+            
+            if hurst > trending_thresh:
+                df.loc[df.index[-1], 'regime_encoded'] = 2  # Trending
+            elif hurst < meanreverting_thresh:
+                df.loc[df.index[-1], 'regime_encoded'] = 1  # Mean-reverting
+            else:
+                df.loc[df.index[-1], 'regime_encoded'] = 0  # Random
+        
+        # ==========================================
+        # POINT 4: VaR confidence levels using Config.VAR_CONFIDENCE
+        # ==========================================
+        df['var_95'] = 0
+        df['cvar_95'] = 0
+        df['var_cvar_spread'] = 0
+        var_window = Config.VAR_LOOKBACK  # FIXED: Use Config directly
+        var_confidence = Config.VAR_CONFIDENCE  # FIXED: Use Config directly (0.99 from your Config)
+        if n > var_window:
+            try:
+                window_returns = df['returns'].iloc[-var_window:].values
+                window_returns = window_returns[~np.isnan(window_returns) & ~np.isinf(window_returns)]
+                if len(window_returns) > var_window // 2:
+                    # Calculate VaR at specified confidence
+                    var_percentile = 100 * (1 - var_confidence)  # For 0.99 confidence, this is 1
+                    var = np.percentile(window_returns, var_percentile)
+                    
+                    # Calculate CVaR at specified confidence
+                    cvar_confidence = Config.CVAR_CONFIDENCE  # Use CVaR confidence from Config
+                    cvar_percentile = 100 * (1 - cvar_confidence)
+                    cvar = np.percentile(window_returns, cvar_percentile)
+                    
+                    df.loc[df.index[-1], 'var_95'] = var
+                    df.loc[df.index[-1], 'cvar_95'] = cvar
+                    df.loc[df.index[-1], 'var_cvar_spread'] = cvar - var
+            except Exception as e:
+                ProfessionalLogger.log(f"VaR/CVaR calculation error: {str(e)}", "WARNING", "FEATURE_ENGINE")
+                pass
+        
+        # Support/Resistance features
+        try:
+            df['distance_to_high_20'] = (df['high'].rolling(20).max() - df['close']) / df['close'].replace(0, 1)
+            df['distance_to_low_20'] = (df['close'] - df['low'].rolling(20).min()) / df['close'].replace(0, 1)
+            df['high_low_range'] = (df['high'].rolling(20).max() - df['low'].rolling(20).min()) / df['close'].replace(0, 1)
+        except:
+            df['distance_to_high_20'] = 0
+            df['distance_to_low_20'] = 0
+            df['high_low_range'] = 0
+        
+        # Volatility regime
+        if Config.VOLATILITY_SCALING_ENABLED:
+            try:
+                current_vol = df['volatility'].iloc[-1] * np.sqrt(252)  # Annualized
+                
+                # FIXED: Use Config directly
+                high_vol = Config.HIGH_VOL_THRESHOLD
+                normal_vol = Config.NORMAL_VOL_THRESHOLD
+                low_vol = Config.LOW_VOL_THRESHOLD
+                
+                if current_vol > high_vol:
+                    df['volatility_regime'] = 2  # High volatility
+                elif current_vol < low_vol:
+                    df['volatility_regime'] = 0  # Low volatility
+                else:
+                    df['volatility_regime'] = 1  # Normal volatility
+            except:
+                df['volatility_regime'] = 1
+        
+        # Z-Score features
+        zscore_window = 50
+        if n > zscore_window:
+            last_idx = df.index[-1]
+            
+            # RSI Z-score
+            try:
+                rsi_mean = df['rsi'].rolling(zscore_window).mean().iloc[-1]
+                rsi_std = df['rsi'].rolling(zscore_window).std().iloc[-1]
+                if rsi_std > 0:
+                    df.loc[last_idx, 'rsi_zscore'] = (df['rsi'].iloc[-1] - rsi_mean) / rsi_std
+                else:
+                    df.loc[last_idx, 'rsi_zscore'] = 0
+            except:
+                df.loc[last_idx, 'rsi_zscore'] = 0
+            
+            # MACD histogram Z-score
+            try:
+                macd_hist_mean = df['macd_hist'].rolling(zscore_window).mean().iloc[-1]
+                macd_hist_std = df['macd_hist'].rolling(zscore_window).std().iloc[-1]
+                if macd_hist_std > 0:
+                    df.loc[last_idx, 'macd_hist_zscore'] = (df['macd_hist'].iloc[-1] - macd_hist_mean) / macd_hist_std
+                else:
+                    df.loc[last_idx, 'macd_hist_zscore'] = 0
+            except:
+                df.loc[last_idx, 'macd_hist_zscore'] = 0
+            
+            # Volume Z-score if available
+            if 'tick_volume' in df.columns:
+                try:
+                    volume_mean = df['tick_volume'].rolling(zscore_window).mean().iloc[-1]
+                    volume_std = df['tick_volume'].rolling(zscore_window).std().iloc[-1]
+                    if volume_std > 0:
+                        df.loc[last_idx, 'volume_zscore'] = (df['tick_volume'].iloc[-1] - volume_mean) / volume_std
+                    else:
+                        df.loc[last_idx, 'volume_zscore'] = 0
+                    
+                    # Volume-price correlation
+                    vol_ratio_window = df['volume_ratio'].iloc[-20:]
+                    returns_window = df['returns'].iloc[-20:]
+                    if len(vol_ratio_window) > 10 and len(returns_window) > 10:
+                        corr = vol_ratio_window.corr(returns_window)
+                        df.loc[last_idx, 'volume_price_correlation'] = 0 if np.isnan(corr) else corr
+                    else:
+                        df.loc[last_idx, 'volume_price_correlation'] = 0
+                    
+                    df.loc[last_idx, 'volume_spike'] = 1 if df['volume_ratio'].iloc[-1] > 2 else 0
+                except:
+                    df.loc[last_idx, 'volume_zscore'] = 0
+                    df.loc[last_idx, 'volume_price_correlation'] = 0
+                    df.loc[last_idx, 'volume_spike'] = 0
+        
+        # Gold-specific features
+        if hasattr(Config, 'GOLD_VOLATILITY_ADJUSTMENT') and Config.GOLD_VOLATILITY_ADJUSTMENT:
+            try:
+                # Calculate normalized ATR based on expected daily range
+                expected_range = Config.EXPECTED_DAILY_RANGE
+                current_atr_percent = df['atr_percent'].iloc[-1] * 100  # Convert to percentage
+                df['gold_atr_normalized'] = current_atr_percent / (expected_range / df['close'].iloc[-1] * 100)
+            except:
+                df['gold_atr_normalized'] = 1
+        
+        # Final cleanup
+        all_features = self.get_feature_columns()
+        for feature in all_features:
+            if feature not in df.columns:
+                df[feature] = 0
+        
+        for col in df.columns:
+            if col in all_features:
+                df[col] = df[col].replace([np.inf, -np.inf], 0)
+                df[col] = df[col].fillna(0)
+        
+        return df
+    
+    def create_labels(self, df, forward_bars=3, method='simple'):
+        """Create labels using advanced methods"""
+        df = df.copy()
+        
+        # ==========================================
+        # POINT 5: Triple barrier labeling using Config
+        # ==========================================
+        # Use triple barrier if configured
+        if hasattr(Config, 'TRIPLE_BARRIER_METHOD') and Config.TRIPLE_BARRIER_METHOD:
+            returns = df['returns'].values
+            labels = np.zeros(len(df))
+            
+            # FIXED: Use Config values directly
+            upper_barrier = Config.BARRIER_UPPER  # 0.0015 from your Config
+            lower_barrier = Config.BARRIER_LOWER  # -0.0008 from your Config
+            barrier_time = Config.BARRIER_TIME    # 10 from your Config
+            
+            # IMPORTANT FIX: Use min(barrier_time, forward_bars) to avoid index errors
+            max_lookahead = min(barrier_time, forward_bars, len(df) - 1)
+            
+            for i in range(len(df) - max_lookahead):
+                if i + max_lookahead >= len(df):
+                    continue
+                
+                # Calculate cumulative returns over the lookahead period
+                future_returns = np.cumprod(1 + returns[i+1:i+max_lookahead+1]) - 1
+                
+                # Check if upper or lower barrier is hit
+                upper_hit = np.any(future_returns >= upper_barrier)
+                lower_hit = np.any(future_returns <= lower_barrier)
+                
+                if upper_hit and lower_hit:
+                    # Both hit (unlikely), check which happens first
+                    upper_idx = np.where(future_returns >= upper_barrier)[0]
+                    lower_idx = np.where(future_returns <= lower_barrier)[0]
+                    if upper_idx[0] < lower_idx[0]:
+                        labels[i] = 1  # Upper hit first
+                    else:
+                        labels[i] = 0  # Lower hit first
+                elif upper_hit:
+                    labels[i] = 1  # Take profit hit
+                elif lower_hit:
+                    labels[i] = 0  # Stop loss hit
+                else:
+                    # Neither hit, decide based on final return
+                    labels[i] = 1 if future_returns[-1] > 0 else 0
+            
+            df['label'] = labels[:len(df)]
+        
+        else:
+            # Simple labeling (fallback)
+            df['forward_return'] = df['close'].shift(-forward_bars) / df['close'] - 1
+            volatility = df['returns'].rolling(20).std().fillna(0.001)
+            
+            # Use dynamic threshold or fixed from Config
+            if hasattr(Config, 'USE_DYNAMIC_SL_TP') and Config.USE_DYNAMIC_SL_TP:
+                # ATR-based dynamic threshold
+                atr_percent = df['atr_percent'].rolling(20).mean().fillna(0.001)
+                dynamic_threshold = atr_percent * Config.ATR_SL_MULTIPLIER
+            else:
+                # Fixed threshold from Config
+                dynamic_threshold = Config.FIXED_SL_PERCENT
+            
+            df['label'] = 0
+            df.loc[df['forward_return'] > dynamic_threshold, 'label'] = 1
+            df.loc[df['forward_return'] < -dynamic_threshold, 'label'] = 0
+        
+        df = df.dropna(subset=['label'])
+        df['label'] = df['label'].astype(int)
         
         return df
     
     def get_feature_columns(self):
-        """Return list of feature columns"""
-        return [
-            'returns', 'log_returns', 'hl_ratio', 'co_ratio',
-            f'price_to_sma_{Config.FAST_MA}', f'price_to_sma_{Config.MEDIUM_MA}', f'price_to_sma_{Config.SLOW_MA}',
-            'atr_percent', 'volatility',
-            'rsi', 'macd_hist',
-            'bb_width', 'bb_position'
+        """Return complete list of feature columns"""
+        base_features = [
+            'returns', 'log_returns', 'hl_ratio', 'co_ratio', 'hlc3',
+            f'price_to_sma_{Config.FAST_MA}', f'price_to_sma_{Config.MEDIUM_MA}', 
+            f'price_to_sma_{Config.SLOW_MA}',
+            f'price_deviation_{Config.MEDIUM_MA}_z',
+            'atr_percent', 'volatility', 'realized_volatility_5', 'realized_volatility_20', 'volatility_ratio',
+            'rsi_normalized', 'rsi_zscore',
+            'macd_hist', 'macd_hist_zscore',
+            'bb_width', 'bb_position', 'bb_width_zscore',
+            'momentum_5', 'momentum_10', 'roc_10', 'momentum_5_zscore',
+            'returns_skew_20', 'returns_kurtosis_20', 'returns_autocorr_1',
+            'distance_to_high_20', 'distance_to_low_20', 'high_low_range',
+            'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'month_sin', 'month_cos',
+            'volume_ratio', 'volume_zscore', 'volume_price_correlation', 'volume_spike',
+            'garch_volatility', 'garch_vol_ratio',
+            'hurst_exponent', 'regime_encoded',
+            'var_95', 'cvar_95', 'var_cvar_spread'
         ]
+        
+        # Add session features if enabled
+        if Config.SESSION_AWARE_TRADING:
+            base_features.extend([
+                'in_london_session', 'in_ny_session', 'in_overlap_session',
+                'avoid_asia_session', 'good_trading_hours'
+            ])
+            if Config.AVOID_MONDAY_FIRST_HOUR:
+                base_features.append('avoid_monday_hour')
+            if Config.AVOID_FRIDAY_LAST_HOURS:
+                base_features.append('avoid_friday_hours')
+        
+        # Add ADX features if enabled
+        if hasattr(Config, 'USE_MARKET_REGIME') and Config.USE_MARKET_REGIME:
+            base_features.extend(['adx', 'trend_strength'])
+        
+        # Add volatility regime if enabled
+        if Config.VOLATILITY_SCALING_ENABLED:
+            base_features.append('volatility_regime')
+        
+        # Add gold-specific features
+        if hasattr(Config, 'GOLD_VOLATILITY_ADJUSTMENT') and Config.GOLD_VOLATILITY_ADJUSTMENT:
+            base_features.append('gold_atr_normalized')
+        
+        return base_features
 
 # ==========================================
-# PROFESSIONAL TRADING ENGINE (Enhanced)
+# FIXED PROFESSIONAL ENSEMBLE (Prevents Data Leakage)
+# ==========================================
+
+# ==========================================
+# PROFESSIONAL ENSEMBLE MODEL (Fixed Diagnostics Structure)
+# ==========================================
+
+class ProfessionalEnsemble:
+    """Professional ensemble with statistical analysis and strict anti-leakage protocols"""
+    
+    def __init__(self, trade_memory, feature_engine):
+        self.feature_engine = feature_engine
+        self.trade_memory = trade_memory
+        self.data_quality_checker = ProfessionalDataQualityChecker()
+        self.stat_analyzer = AdvancedStatisticalAnalyzer()
+        self.risk_metrics = ProfessionalRiskMetrics()
+        
+        # Model components
+        self.base_models = self._initialize_base_models()
+        self.ensemble = self._create_ensemble_structure()
+        
+        # SCALER MANAGEMENT
+        self.final_scaler = None 
+        
+        # Training state
+        self.is_trained = False
+        self.last_train_time = None
+        self.training_metrics = {}
+        self.feature_importance = {}
+        self.statistical_analysis = {}
+        self.trained_feature_columns = None
+        self.fitted_base_models = {}
+        
+        ProfessionalLogger.log("Ensemble initialized with strict anti-leakage protocols", "INFO", "ENSEMBLE")
+
+    def _initialize_base_models(self):
+        """Initialize diverse base models"""
+        models = []
+        
+        # Gradient Boosting
+        models.append(('GB', GradientBoostingClassifier(
+            n_estimators=100, max_depth=5, learning_rate=0.05, 
+            subsample=0.8, min_samples_split=10, min_samples_leaf=5, random_state=42
+        )))
+        
+        # Random Forest
+        models.append(('RF', RandomForestClassifier(
+            n_estimators=100, max_depth=10, min_samples_split=8, 
+            min_samples_leaf=4, max_features='sqrt', bootstrap=True, 
+            random_state=42, n_jobs=-1
+        )))
+        
+        # Logistic Regression
+        models.append(('LR', LogisticRegression(
+            penalty='l2', C=1.0, max_iter=1000, 
+            random_state=42, class_weight='balanced', solver='liblinear'
+        )))
+        
+        # Neural Network
+        models.append(('NN', MLPClassifier(
+            hidden_layer_sizes=(50, 25), activation='relu', solver='adam', 
+            alpha=0.0001, max_iter=500, random_state=42
+        )))
+        
+        # XGBoost if available
+        if XGB_AVAILABLE:
+            models.append(('XGB', XGBClassifier(
+                n_estimators=100, max_depth=6, learning_rate=0.05, 
+                subsample=0.8, colsample_bytree=0.8, random_state=42, n_jobs=-1
+            )))
+            
+        return models
+
+    def _create_ensemble_structure(self):
+        """Create ensemble structure"""
+        return VotingClassifier(
+            estimators=[(name, model) for name, model in self.base_models],
+            voting='soft',
+            n_jobs=-1
+        )
+
+    def _prepare_training_data(self, data):
+        """Prepare training data (Calculate features & labels)"""
+        try:
+            # Calculate features
+            df_features = self.feature_engine.calculate_features(data)
+            
+            # Create labels
+            df_labeled = self.feature_engine.create_labels(df_features, method='simple')
+            df_labeled = df_labeled.dropna(subset=['label'])
+            
+            # Get feature columns
+            all_feature_cols = self.feature_engine.get_feature_columns()
+            self.trained_feature_columns = all_feature_cols # Save columns used
+            
+            # Extract X and y (Unscaled)
+            X = df_labeled[all_feature_cols].copy().fillna(0).replace([np.inf, -np.inf], 0)
+            
+            # Ensure numeric
+            for col in X.columns:
+                X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
+                
+            y = df_labeled['label'].astype(int)
+            
+            return X, y
+
+        except Exception as e:
+            ProfessionalLogger.log(f"Error preparing data: {e}", "ERROR", "ENSEMBLE")
+            return None, None
+
+    def perform_statistical_analysis(self, data):
+        """Perform statistical analysis (Wrapper)"""
+        if data is None or len(data) < 100: return {}
+        try:
+            returns = data['close'].pct_change().dropna().values
+            analysis = {
+                'return_distribution': self.stat_analyzer.analyze_return_distribution(returns),
+                'market_regime': self.stat_analyzer.calculate_market_regime(data),
+                'risk_metrics': self.risk_metrics.calculate_risk_metrics(returns)
+            }
+            self.statistical_analysis = analysis
+            return analysis
+        except Exception as e:
+            ProfessionalLogger.log(f"Stat analysis failed: {e}", "ERROR", "ENSEMBLE")
+            return {}
+
+    def train(self, data):
+        """Train ensemble with Strict Walk-Forward Optimization (No Leakage)"""
+        try:
+            if data is None or len(data) < Config.TRAINING_MIN_SAMPLES:
+                ProfessionalLogger.log("Insufficient data for training.", "ERROR", "ENSEMBLE")
+                return False
+
+            ProfessionalLogger.log(f"Starting training on {len(data)} samples...", "LEARN", "ENSEMBLE")
+            
+            # 1. Prepare Raw Data
+            X_raw, y_raw = self._prepare_training_data(data)
+            if X_raw is None: return False
+
+            # 2. Walk-Forward Validation (WFO)
+            # We split the indices first, then scale INSIDE the loop
+            tscv = TimeSeriesSplit(
+                n_splits=Config.WALK_FORWARD_FOLDS, 
+                max_train_size=Config.WALK_FORWARD_WINDOW
+            )
+            
+            cv_scores = []
+            ProfessionalLogger.log(f"Executing WFO ({Config.WALK_FORWARD_FOLDS} folds)...", "LEARN", "ENSEMBLE")
+
+            for fold, (train_idx, val_idx) in enumerate(tscv.split(X_raw)):
+                # Enforce minimum training size
+                if len(train_idx) < 100: continue
+
+                # A. Split Data (Raw)
+                X_train_fold, X_val_fold = X_raw.iloc[train_idx], X_raw.iloc[val_idx]
+                y_train_fold, y_val_fold = y_raw.iloc[train_idx], y_raw.iloc[val_idx]
+                
+                # B. Fit Scaler ONLY on Training Fold (Prevents Leakage)
+                fold_scaler = RobustScaler()
+                X_train_scaled = fold_scaler.fit_transform(X_train_fold)
+                
+                # C. Transform Validation using Training Scaler
+                X_val_scaled = fold_scaler.transform(X_val_fold)
+                
+                # D. Fit & Score
+                self.ensemble.fit(X_train_scaled, y_train_fold)
+                val_score = self.ensemble.score(X_val_scaled, y_val_fold)
+                cv_scores.append(val_score)
+                
+                ProfessionalLogger.log(f"  Fold {fold+1}: Acc={val_score:.2%}", "LEARN", "ENSEMBLE")
+
+            avg_score = np.mean(cv_scores) if cv_scores else 0.0
+
+            if avg_score < Config.MIN_ACCURACY_THRESHOLD:
+                ProfessionalLogger.log(f"⚠ Low WFO Accuracy: {avg_score:.2%}", "WARNING", "ENSEMBLE")
+
+            # 3. Final Training for Live Trading
+            # We train on the most recent window allowed by config
+            final_window_size = min(len(X_raw), Config.WALK_FORWARD_WINDOW * 2) 
+            X_final_raw = X_raw.iloc[-final_window_size:]
+            y_final = y_raw.iloc[-final_window_size:]
+            
+            # Create and Fit the FINAL scaler (this is what we use for live predict)
+            self.final_scaler = RobustScaler()
+            X_final_scaled = self.final_scaler.fit_transform(X_final_raw)
+            
+            ProfessionalLogger.log(f"Fitting final model on last {len(X_final_raw)} bars...", "LEARN", "ENSEMBLE")
+            self.ensemble.fit(X_final_scaled, y_final)
+            
+            # Store fitted base models for individual confidence checks
+            if hasattr(self.ensemble, 'named_estimators_'):
+                self.fitted_base_models = self.ensemble.named_estimators_
+            
+            # Update state
+            self.is_trained = True
+            self.last_train_time = datetime.now()
+            self.training_metrics = {'avg_cv_score': avg_score}
+            
+            ProfessionalLogger.log(f"✅ Training Complete | WFO Accuracy: {avg_score:.2%}", "SUCCESS", "ENSEMBLE")
+            return True
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Training error: {str(e)}", "ERROR", "ENSEMBLE")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def predict(self, df):
+        """Make prediction using the final fitted scaler"""
+        if not self.is_trained or self.final_scaler is None:
+            ProfessionalLogger.log("Model not trained.", "WARNING", "ENSEMBLE")
+            return None, 0.0, None, {}
+        
+        try:
+            # 1. Calculate features
+            df_feat = self.feature_engine.calculate_features(df)
+            
+            # 2. Extract Feature Vector (Raw)
+            # Ensure we use exactly the same columns as training
+            if self.trained_feature_columns is None:
+                self.trained_feature_columns = self.feature_engine.get_feature_columns()
+                
+            X_raw = df_feat[self.trained_feature_columns].iloc[-1:].fillna(0).replace([np.inf, -np.inf], 0)
+            
+            # 3. Scale using the Saved Final Scaler
+            X_scaled = self.final_scaler.transform(X_raw)
+            
+            # 4. Predict
+            prediction = self.ensemble.predict(X_scaled)[0]
+            proba = self.ensemble.predict_proba(X_scaled)[0]
+            confidence = np.max(proba)
+            
+            # Extract features dict for logging
+            features = {col: float(X_raw[col].iloc[0]) for col in self.trained_feature_columns}
+            
+            # 5. Get Sub-model Predictions (for Agreement Logic)
+            sub_preds = {}
+            if self.fitted_base_models:
+                 for name, model in self.fitted_base_models.items():
+                     try:
+                         sub_p = model.predict(X_scaled)[0]
+                         sub_preds[name] = {'prediction': int(sub_p)}
+                     except: pass
+            
+            # 6. Basic Validation
+            validation = self._validate_prediction(prediction, confidence, features)
+            if not validation['is_valid']:
+                ProfessionalLogger.log(f"Validation failed: {validation['reason']}", "WARNING", "ENSEMBLE")
+                return None, 0.0, None, {}
+
+            return prediction, confidence, features, sub_preds
+
+        except Exception as e:
+            ProfessionalLogger.log(f"Prediction error: {e}", "ERROR", "ENSEMBLE")
+            return None, 0.0, None, {}
+
+    def _validate_prediction(self, prediction, confidence, features):
+        """Quick validation check"""
+        rsi = features.get('rsi_normalized', 0) * 50 + 50
+        if prediction == 1 and rsi > 70:
+            return {'is_valid': False, 'reason': f"Buy Signal but RSI Overbought ({rsi:.1f})"}
+        if prediction == 0 and rsi < 30: 
+             pass
+        return {'is_valid': True, 'reason': None}
+
+    def should_retrain(self):
+        """Check if retraining is needed"""
+        if not self.last_train_time: return True
+        hours_since = (datetime.now() - self.last_train_time).total_seconds() / 3600
+        return hours_since >= Config.RETRAIN_HOURS
+
+    def get_diagnostics(self):
+        """Get comprehensive model diagnostics matching Engine expectation"""
+        # This structure matches what ProfessionalTradingEngine expects
+        return {
+            'training_status': {
+                'is_trained': self.is_trained,
+                'last_train_time': self.last_train_time,
+                'training_metrics': self.training_metrics
+            },
+            'statistical_analysis': self.statistical_analysis,
+            'feature_analysis': {
+                'top_features': [] # Placeholder to avoid errors if accessed
+            },
+            'model_info': {
+                'base_models': [name for name, _ in self.base_models],
+                'ensemble_type': 'voting'
+            }
+        }
+# ==========================================
+# SMART ORDER EXECUTOR
+# ==========================================
+
+# ==========================================
+# SMART ORDER EXECUTOR (Corrected)
+# ==========================================
+class SmartOrderExecutor:
+    """Intelligent order execution with modification capabilities"""
+
+    def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, comment=""):
+        """
+        Executes a trade with the specified parameters.
+        Must define 'symbol' as the first argument to match the Engine call.
+        """
+        # 1. Get Symbol Info
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            ProfessionalLogger.log(f"Symbol {symbol} not found", "ERROR", "EXECUTOR")
+            return None
+
+        # 2. Strict Volume Normalization
+        step = symbol_info.volume_step
+        min_vol = symbol_info.volume_min
+        max_vol = symbol_info.volume_max
+        
+        if step > 0:
+            volume = round(volume / step) * step
+        
+        volume = max(min_vol, min(volume, max_vol))
+        
+        decimals = 2
+        if step < 0.01: decimals = 3
+        if step == 1.0: decimals = 0
+        volume = round(volume, decimals)
+
+        # 3. Check Free Margin
+        account = mt5.account_info()
+        if account:
+            margin_required = (volume * entry_price * symbol_info.trade_contract_size) / account.leverage
+            if account.margin_free < margin_required:
+                ProfessionalLogger.log(f"Insufficient Margin: Need ${margin_required:.2f}, Have ${account.margin_free:.2f}", "ERROR", "EXECUTOR")
+                return None
+
+        # 4. Prepare Request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": float(entry_price),
+            "sl": float(sl),
+            "tp": float(tp),
+            "magic": magic,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+
+        # 5. Execute with Retries
+        for i in range(3):
+            result = mt5.order_send(request)
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                ProfessionalLogger.log(f"✅ Order Executed: #{result.order} | {symbol} | Vol: {volume}", "SUCCESS", "EXECUTOR")
+                return result
+            elif result.retcode in [mt5.TRADE_RETCODE_REQUOTE, mt5.TRADE_RETCODE_PRICE_OFF]:
+                time.sleep(0.5)
+                # Update price for requote
+                tick = mt5.symbol_info_tick(symbol)
+                if tick: 
+                    request['price'] = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+            else:
+                ProfessionalLogger.log(f"❌ Order Failed: {result.comment} ({result.retcode})", "ERROR", "EXECUTOR")
+                break
+        return None
+
+    def modify_position(self, ticket, symbol, new_sl, new_tp):
+        """Modify SL/TP of an existing position"""
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": symbol,
+            "sl": float(new_sl),
+            "tp": float(new_tp)
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            ProfessionalLogger.log(f"🔄 Position #{ticket} Modified | New SL: {new_sl}", "SUCCESS", "EXECUTOR")
+            return True
+        else:
+            ProfessionalLogger.log(f"❌ Modify Failed: {result.comment}", "ERROR", "EXECUTOR")
+            return False
+
+    def close_position(self, ticket, symbol):
+        """Close a specific position"""
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            return False
+        
+        pos = positions[0]
+        tick = mt5.symbol_info_tick(symbol)
+        
+        # Determine opposite order type
+        order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+        
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "volume": pos.volume,
+            "type": order_type,
+            "price": price,
+            "deviation": 20,
+            "magic": Config.MAGIC_NUMBER,
+            "comment": "Adaptive Exit",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            ProfessionalLogger.log(f"💰 Position #{ticket} Closed by Adaptive Manager", "SUCCESS", "EXECUTOR")
+            return True
+        return False
+
+# ==========================================
+# PROFESSIONAL TRADE MEMORY
+# ==========================================
+class ProfessionalTradeMemory:
+    """Trade memory system"""
+    
+    def __init__(self, history_file=None):
+        self.history_file = history_file or Config.TRADE_HISTORY_FILE
+        self.trades = []
+        self._initialize_memory()
+        
+    def _initialize_memory(self):
+        """Initialize trade memory"""
+        try:
+            import json
+            import os
+            
+            if os.path.exists(self.history_file):
+                with open(self.history_file, 'r') as f:
+                    self.trades = json.load(f)
+                ProfessionalLogger.log(f"Loaded {len(self.trades)} trades from {self.history_file}", 
+                                     "DATA", "MEMORY")
+            else:
+                self.trades = []
+        except Exception as e:
+            ProfessionalLogger.log(f"Memory initialization error: {str(e)}", "WARNING", "MEMORY")
+            self.trades = []
+            
+    def save_history(self):
+        """Save trade history"""
+        try:
+            import json
+            with open(self.history_file, 'w') as f:
+                json.dump(self.trades, f, indent=2)
+        except Exception as e:
+            ProfessionalLogger.log(f"Error saving history: {str(e)}", "ERROR", "MEMORY")
+            
+    def add_trade(self, trade_data):
+        """Add new trade"""
+        try:
+            trade_data['id'] = len(self.trades) + 1
+            trade_data['timestamp'] = datetime.now().isoformat()
+            self.trades.append(trade_data)
+            
+            if len(self.trades) > Config.MEMORY_SIZE:
+                self.trades = self.trades[-Config.MEMORY_SIZE:]
+            
+            self.save_history()
+            
+            ProfessionalLogger.log(f"Trade #{trade_data['id']} recorded", "TRADE", "MEMORY")
+            return True
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Error adding trade: {str(e)}", "ERROR", "MEMORY")
+            return False
+            
+    def get_statistical_summary(self):
+        """Get statistical summary of trades"""
+        completed = [t for t in self.trades if t.get('status') == 'closed']
+        
+        if not completed:
+            return {'total_trades': 0, 'win_rate': 0}
+        
+        profits = [t.get('profit', 0) for t in completed]
+        
+        stats = {
+            'total_trades': len(completed),
+            'winning_trades': sum(1 for p in profits if p > 0),
+            'losing_trades': sum(1 for p in profits if p <= 0),
+            'win_rate': sum(1 for p in profits if p > 0) / len(profits),
+            'total_profit': sum(profits),
+            'mean_profit': np.mean(profits),
+            'median_profit': np.median(profits),
+            'std_profit': np.std(profits),
+            'min_profit': min(profits),
+            'max_profit': max(profits)
+        }
+        
+        losing_sum = abs(sum(p for p in profits if p <= 0))
+        if losing_sum > 0:
+            winning_sum = sum(p for p in profits if p > 0)
+            stats['profit_factor'] = winning_sum / losing_sum
+        else:
+            stats['profit_factor'] = float('inf')
+            
+        return stats
+
+# ==========================================
+# PROFESSIONAL TRADING ENGINE WITH STATISTICAL ANALYSIS
+# ==========================================
+# ==========================================
+# PROFESSIONAL TRADING ENGINE (Fixed Config Usage)
+# ==========================================
+# ==========================================
+# PROFESSIONAL TRADING ENGINE (Adaptive Cashout Enabled)
 # ==========================================
 class ProfessionalTradingEngine:
-    """Main professional trading engine with multi-timeframe analysis"""
+    """Main professional trading engine with advanced statistical analysis and adaptive management"""
     
     def __init__(self):
         self.trade_memory = ProfessionalTradeMemory()
         self.feature_engine = ProfessionalFeatureEngine()
-        self.order_executor = SmartOrderExecutor()
+        self.order_executor = SmartOrderExecutor() # Ensure this is the updated version
         self.stat_analyzer = AdvancedStatisticalAnalyzer()
+        self.risk_metrics = ProfessionalRiskMetrics()
         
-        # Initialize model
+        # Initialize model with statistical analysis
         self.model = ProfessionalEnsemble(self.trade_memory, self.feature_engine)
+        
+        # NEW: Initialize Adaptive Exit Manager
+        self.exit_manager = AdaptiveExitManager(self.order_executor)
         
         self.connected = False
         self.active_positions = {}
         self.iteration = 0
-        self.last_mtf_analysis = None
+        self.last_analysis_time = None
+        self.last_regime = None
         
-        ProfessionalLogger.log("Professional Trading Engine initialized with multi-timeframe analysis", "INFO", "ENGINE")
-    
+        # Performance tracking
+        self.equity_curve = []
+        self.returns_series = []
+        self.risk_metrics_history = []
+        self.fitted_base_models = None
+        
+        ProfessionalLogger.log("Professional Trading Engine initialized with Adaptive Exit Manager", "INFO", "ENGINE")
+
     def connect_mt5(self):
         """Connect to MT5 terminal"""
         ProfessionalLogger.log("Initializing MT5...", "INFO", "ENGINE")
@@ -1416,7 +2298,7 @@ class ProfessionalTradingEngine:
         account = mt5.account_info()
         if account:
             ProfessionalLogger.log(f"✓ Connected | Account: {account.login} | "
-                      f"Balance: ${account.balance:.2f} | Equity: ${account.equity:.2f}", "SUCCESS", "ENGINE")
+                        f"Balance: ${account.balance:.2f} | Equity: ${account.equity:.2f}", "SUCCESS", "ENGINE")
         else:
             ProfessionalLogger.log("✓ Connected (account info unavailable)", "SUCCESS", "ENGINE")
         
@@ -1434,104 +2316,130 @@ class ProfessionalTradingEngine:
         
         self.connected = True
         
-        # Perform initial multi-timeframe analysis
-        self.perform_initial_mtf_analysis()
+        # Initial statistical analysis
+        self.perform_initial_analysis()
         
         return True
-    
-    def perform_initial_mtf_analysis(self):
-        """Perform initial multi-timeframe analysis"""
-        ProfessionalLogger.log("Performing initial multi-timeframe analysis...", "ANALYSIS", "ENGINE")
+
+    def perform_initial_analysis(self):
+        """Perform initial statistical analysis"""
+        ProfessionalLogger.log("Performing initial market analysis...", "ANALYSIS", "ENGINE")
         
-        analysis = self.stat_analyzer.analyze_multi_timeframe(Config.SYMBOL)
+        # FIXED: Use Config.LOOKBACK_BARS
+        data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
         
-        if analysis:
-            self.last_mtf_analysis = analysis
-            ProfessionalLogger.log("Initial multi-timeframe analysis complete", "SUCCESS", "ENGINE")
-            
-            # Log key recommendations
-            recommendation = analysis.get('recommendation', {})
-            if recommendation:
-                ProfessionalLogger.log(f"Initial Recommendation: {recommendation.get('trade_signal', 'HOLD')} "
-                                     f"(Confidence: {recommendation.get('confidence', 0):.1%})", "ANALYSIS", "ENGINE")
-        else:
-            ProfessionalLogger.log("Initial multi-timeframe analysis failed", "WARNING", "ENGINE")
-    
-    def perform_periodic_mtf_analysis(self):
-        """Perform periodic multi-timeframe analysis"""
-        ProfessionalLogger.log("🔄 Running periodic multi-timeframe analysis...", "TIMEFRAME", "ENGINE")
-        
-        analysis = self.stat_analyzer.analyze_multi_timeframe(Config.SYMBOL)
-        
-        if analysis:
-            self.last_mtf_analysis = analysis
+        if data is not None and len(data) > 500:
+            # Perform comprehensive statistical analysis
+            analysis = self.model.perform_statistical_analysis(data)
             
             # Log key findings
-            recommendation = analysis.get('recommendation', {})
-            if recommendation:
-                signal = recommendation.get('trade_signal', 'HOLD')
-                confidence = recommendation.get('confidence', 0)
+            if analysis:
+                ProfessionalLogger.log("Initial market analysis complete", "SUCCESS", "ENGINE")
                 
-                ProfessionalLogger.log(f"Multi-Timeframe Recommendation: {signal} (Confidence: {confidence:.1%})", 
-                                     "TIMEFRAME", "ENGINE")
+                # Store for reference
+                self.initial_analysis = analysis
                 
-                if signal != 'HOLD' and confidence > Config.MIN_CONFIDENCE:
-                    ProfessionalLogger.log(f"✅ Strong {signal} signal across timeframes", "SUCCESS", "ENGINE")
+                # Extract key insights
+                self._extract_market_insights(analysis)
+            else:
+                ProfessionalLogger.log("Initial analysis returned no results", "WARNING", "ENGINE")
+        else:
+            ProfessionalLogger.log("Insufficient data for initial analysis", "WARNING", "ENGINE")
+
+    def _extract_market_insights(self, analysis):
+        """Extract and log key market insights"""
+        insights = []
         
-        return analysis
-    
-    def run_periodic_tasks(self):
-        """Run periodic maintenance and analysis tasks"""
-        self.iteration += 1
+        # Market regime insight
+        if 'market_regime' in analysis:
+            mr = analysis['market_regime']
+            regime = mr.get('regime', 'unknown')
+            confidence = mr.get('confidence', 0)
+            
+            if confidence > 0.7:
+                insights.append(f"Market is in {regime} regime (confidence: {confidence:.0%})")
+            
+            # Trading implications based on regime
+            if regime == 'trending':
+                insights.append("Consider trend-following strategies with wider stops")
+            elif regime == 'mean_reverting':
+                insights.append("Consider mean-reversion strategies with tight stops")
+            elif regime == 'volatile':
+                insights.append("High volatility - consider reducing position sizes")
         
-        # Perform multi-timeframe analysis every 30 minutes
-        if self.iteration % 30 == 0:
-            self.perform_periodic_mtf_analysis()
+        # Risk insights
+        if 'risk_metrics' in analysis:
+            rm = analysis['risk_metrics']
+            
+            if 'sharpe' in rm:
+                sharpe = rm['sharpe']
+                if sharpe > 1:
+                    insights.append(f"Good risk-adjusted returns (Sharpe: {sharpe:.2f})")
+                elif sharpe < 0:
+                    insights.append(f"Negative risk-adjusted returns (Sharpe: {sharpe:.2f})")
+            
+            if 'max_drawdown' in rm:
+                max_dd = rm['max_drawdown']
+                if max_dd > 0.1:  # 10% drawdown
+                    insights.append(f"Historical max drawdown: {max_dd:.1%} - adjust risk accordingly")
         
-        # Check closed positions
-        self.check_closed_positions()
+        # Tail risk insights
+        if 'tail_risk' in analysis:
+            tr = analysis['tail_risk']
+            if 'tail_index' in tr:
+                tail_idx = tr['tail_index']
+                if tail_idx < 2:
+                    insights.append(f"Fat tails detected (index: {tail_idx:.2f}) - consider tail risk hedging")
         
-        # Retrain model if needed
-        if self.model.should_retrain():
-            ProfessionalLogger.log("🔄 Periodic model retraining...", "LEARN", "ENGINE")
-            data = self.get_historical_data(bars=2000)
-            if data is not None:
-                success = self.model.train(data)
-                if success:
-                    ProfessionalLogger.log("✅ Model retraining successful", "SUCCESS", "ENGINE")
-        
-        # Print status every 30 iterations
-        if self.iteration % 30 == 0:
-            self.print_status()
-    
+        # Log insights
+        if insights:
+            ProfessionalLogger.log("📈 MARKET INSIGHTS:", "ANALYSIS", "ENGINE")
+            for insight in insights:
+                ProfessionalLogger.log(f"  • {insight}", "ANALYSIS", "ENGINE")
+
     def get_historical_data(self, timeframe=None, bars=None):
         """Get historical data from MT5"""
         if not self.connected:
             return None
         
         if timeframe is None:
-            timeframe = Config.PRIMARY_TIMEFRAME
+            timeframe = Config.TIMEFRAME
         if bars is None:
-            bars = 1000
+            bars = Config.LOOKBACK_BARS
         
         rates = mt5.copy_rates_from_pos(Config.SYMBOL, timeframe, 0, bars)
         if rates is None or len(rates) == 0:
             return None
         
         return pd.DataFrame(rates)
-    
+
+    def get_current_positions(self):
+        """Get current open positions"""
+        if not self.connected:
+            return 0
+        
+        positions = mt5.positions_get(symbol=Config.SYMBOL)
+        return len(positions) if positions else 0
+
     def check_closed_positions(self):
-        """Check for closed positions"""
+        """Check for closed positions and update records"""
         if not self.connected:
             return
         
         positions = mt5.positions_get(symbol=Config.SYMBOL)
-        current_tickets = [pos.ticket for pos in positions] if positions else []
+        if positions is None:
+            positions = [] # Handle None return
         
+        current_tickets = [pos.ticket for pos in positions]
+        
+        # Check which positions are no longer open
         for ticket in list(self.active_positions.keys()):
             if ticket not in current_tickets:
                 # Position was closed
                 trade_data = self.active_positions[ticket]
+                
+                # Get the signal from trade_data
+                signal = trade_data.get('signal', 1)  # Default to BUY (1) if not found
                 
                 # Get deal information
                 from_date = datetime.now() - timedelta(days=1)
@@ -1540,109 +2448,223 @@ class ProfessionalTradingEngine:
                 if deals:
                     for deal in deals:
                         if deal.position_id == ticket:
+                            # Calculate returns
+                            open_price = trade_data['open_price']
+                            close_price = deal.price
+                            returns = (close_price - open_price) / open_price if signal == 1 else (open_price - close_price) / open_price
+                            
+                            outcome = {
+                                'profit': deal.profit,
+                                'close_price': deal.price,
+                                'close_time': int(deal.time),
+                                'status': 'closed',
+                                'returns': returns,
+                                'duration': int(deal.time) - trade_data['open_time']
+                            }
+                            trade_data.update(outcome)
+                            
+                            # Add to trade memory
+                            self.trade_memory.add_trade(trade_data)
+                            
+                            # Update returns series for statistical analysis
+                            self.returns_series.append(returns)
+                            
+                            # Log closure
                             profit_loss = "profit" if deal.profit > 0 else "loss"
                             ProfessionalLogger.log(f"Trade #{ticket} closed with {profit_loss} | P/L: ${deal.profit:.2f}", 
                                                  "SUCCESS" if deal.profit > 0 else "WARNING", "ENGINE")
                             break
                 
                 del self.active_positions[ticket]
-    
+
+    def run_periodic_tasks(self):
+        """Run periodic maintenance and analysis tasks"""
+        self.iteration += 1
+        
+        # Check closed positions
+        self.check_closed_positions()
+        
+        # Update performance metrics every 10 iterations
+        if self.iteration % 10 == 0:
+            self.update_performance_metrics()
+        
+        # Perform statistical analysis periodically
+        if self.last_analysis_time is None or \
+           (datetime.now() - self.last_analysis_time).total_seconds() > 3600:  # Every hour
+            self.perform_periodic_analysis()
+            self.last_analysis_time = datetime.now()
+        
+        # Retrain model if needed
+        if self.model.should_retrain():
+            ProfessionalLogger.log("🔄 Periodic model retraining...", "LEARN", "ENGINE")
+            
+            # FIXED: Use Config.LOOKBACK_BARS
+            data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
+            
+            if data is not None:
+                success = self.model.train(data)
+                if success:
+                    ProfessionalLogger.log("✅ Model retraining successful", "SUCCESS", "ENGINE")
+                else:
+                    ProfessionalLogger.log("❌ Model retraining failed", "WARNING", "ENGINE")
+        
+        # Print status periodically
+        if self.iteration % 30 == 0:
+            self.print_status()
+
+    def perform_periodic_analysis(self):
+        """Perform periodic statistical analysis"""
+        ProfessionalLogger.log("🔄 Running periodic statistical analysis...", "ANALYSIS", "ENGINE")
+        
+        # FIXED: Use Config.LOOKBACK_BARS or safe max
+        analysis_bars = min(Config.LOOKBACK_BARS, 5000) 
+        data = self.get_historical_data(bars=analysis_bars)
+        
+        if data is not None and len(data) > 500:
+            # Perform analysis
+            analysis = self.model.perform_statistical_analysis(data)
+            
+            # Extract current market insights
+            if analysis:
+                current_regime = analysis.get('market_regime', {}).get('regime', 'unknown')
+                regime_confidence = analysis.get('market_regime', {}).get('confidence', 0)
+                
+                if regime_confidence > 0.7:
+                    ProfessionalLogger.log(f"Current Market Regime: {current_regime} (confidence: {regime_confidence:.0%})", 
+                                         "ANALYSIS", "ENGINE")
+                
+                # Check for regime changes
+                if hasattr(self, 'last_regime') and self.last_regime != current_regime:
+                    ProfessionalLogger.log(f"⚠ Market regime changed from {self.last_regime} to {current_regime}", 
+                                         "WARNING", "ENGINE")
+                
+                self.last_regime = current_regime
+
+    def update_performance_metrics(self):
+        """Update and calculate performance metrics"""
+        if not self.connected:
+            return
+        
+        account = mt5.account_info()
+        if account:
+            # Update equity curve
+            self.equity_curve.append(account.equity)
+            
+            # Keep only recent history
+            if len(self.equity_curve) > 1000:
+                self.equity_curve = self.equity_curve[-1000:]
+            
+            # Calculate risk metrics if we have enough data
+            if len(self.returns_series) >= 20:
+                recent_returns = self.returns_series[-20:]
+                risk_metrics = self.risk_metrics.calculate_risk_metrics(recent_returns)
+                self.risk_metrics_history.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'metrics': risk_metrics
+                })
+                
+                # Keep only recent history
+                if len(self.risk_metrics_history) > 100:
+                    self.risk_metrics_history = self.risk_metrics_history[-100:]
+
     def print_status(self):
-        """Print current status"""
+        """Print current trading status"""
         account = mt5.account_info()
         if not account:
             return
         
-        positions = len(self.active_positions)
+        positions = self.get_current_positions()
         tick = mt5.symbol_info_tick(Config.SYMBOL)
         
         if tick:
             price = tick.ask
             
+            # Calculate simple P/L if we have trades
+            stats = self.trade_memory.get_statistical_summary()
+            
             status_msg = (f"Status | Price: {price:.2f} | Positions: {positions} | "
                          f"Equity: ${account.equity:.2f}")
             
+            if stats and stats.get('total_trades', 0) > 0:
+                status_msg += f" | Trades: {stats['total_trades']} | Win Rate: {stats.get('win_rate', 0):.1%}"
+            
             ProfessionalLogger.log(status_msg, "INFO", "ENGINE")
-    
+
+    def print_performance_report(self):
+        """Print comprehensive performance report"""
+        stats = self.trade_memory.get_statistical_summary()
+        
+        if not stats or stats.get('total_trades', 0) == 0:
+            ProfessionalLogger.log("No trading performance data available", "INFO", "ENGINE")
+            return
+        
+        ProfessionalLogger.log("=" * 70, "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log("📊 COMPREHENSIVE PERFORMANCE REPORT", "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log(f"Total Trades: {stats['total_trades']}", "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log(f"Win Rate: {stats['win_rate']:.1%}", "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log(f"Total Profit: ${stats['total_profit']:.2f}", "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log(f"Average Profit: ${stats['mean_profit']:.2f}", "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log(f"Profit Std Dev: ${stats['std_profit']:.2f}", "PERFORMANCE", "ENGINE")
+        ProfessionalLogger.log(f"Profit Factor: {stats['profit_factor']:.2f}", "PERFORMANCE", "ENGINE")
+        
+        # Risk metrics if available
+        if len(self.risk_metrics_history) > 0:
+            latest_metrics = self.risk_metrics_history[-1]['metrics']
+            
+            ProfessionalLogger.log("Risk Metrics:", "PERFORMANCE", "ENGINE")
+            if 'sharpe' in latest_metrics:
+                ProfessionalLogger.log(f"  Sharpe Ratio: {latest_metrics['sharpe']:.3f}", "PERFORMANCE", "ENGINE")
+            if 'sortino' in latest_metrics:
+                ProfessionalLogger.log(f"  Sortino Ratio: {latest_metrics['sortino']:.3f}", "PERFORMANCE", "ENGINE")
+            if 'max_drawdown' in latest_metrics:
+                ProfessionalLogger.log(f"  Max Drawdown: {latest_metrics['max_drawdown']:.2%}", "PERFORMANCE", "ENGINE")
+            if 'omega' in latest_metrics:
+                ProfessionalLogger.log(f"  Omega Ratio: {latest_metrics['omega']:.3f}", "PERFORMANCE", "ENGINE")
+        
+        # Statistical insights
+        if hasattr(self, 'initial_analysis'):
+            ia = self.initial_analysis
+            if 'market_regime' in ia:
+                mr = ia['market_regime']
+                ProfessionalLogger.log(f"Initial Market Analysis: {mr.get('regime', 'unknown')} regime", "PERFORMANCE", "ENGINE")
+        
+        ProfessionalLogger.log("=" * 70, "PERFORMANCE", "ENGINE")
+
     def train_initial_model(self):
-        """Train initial model"""
-        ProfessionalLogger.log("Training initial model...", "INFO", "ENGINE")
-        
-        data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
-        
-        if data is not None:
-            data_len = len(data)
-            ProfessionalLogger.log(f"Retrieved {data_len} bars for training", "DATA", "ENGINE")
+            """Train initial model with statistical analysis using deep history"""
+            ProfessionalLogger.log(f"Loading deep history ({Config.LOOKBACK_BARS} bars) for initial training...", "INFO", "ENGINE")
             
-            if data_len >= Config.TRAINING_MIN_SAMPLES:
-                success = self.model.train(data)
-                if success:
-                    ProfessionalLogger.log("✅ Initial model training successful", "SUCCESS", "ENGINE")
+            # FIXED: Use Config.LOOKBACK_BARS
+            data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
+            
+            if data is not None:
+                data_len = len(data)
+                ProfessionalLogger.log(f"Retrieved {data_len} bars from MT5", "DATA", "ENGINE")
+
+                # Check if we satisfy the training minimums
+                if data_len >= Config.TRAINING_MIN_SAMPLES:
+                    ProfessionalLogger.log(f"Initializing Walk-Forward Optimization (Window: {Config.WALK_FORWARD_WINDOW}, Folds: {Config.WALK_FORWARD_FOLDS})...", "LEARN", "ENSEMBLE")
+                    
+                    # Perform statistical analysis before training
+                    analysis = self.model.perform_statistical_analysis(data)
+                    
+                    # Train model
+                    success = self.model.train(data)
+                    
+                    if success:
+                        diag = self.model.get_diagnostics()
+                        metrics = diag['training_status']['training_metrics']
+                        ProfessionalLogger.log("✅ Initial model training successful", "SUCCESS", "ENGINE")
+                        ProfessionalLogger.log(f"   CV Score: {metrics.get('avg_cv_score', 0):.2%}", "INFO", "ENGINE")
+                    else:
+                        ProfessionalLogger.log("❌ Initial model training failed", "WARNING", "ENGINE")
                 else:
-                    ProfessionalLogger.log("❌ Initial model training failed", "WARNING", "ENGINE")
+                    ProfessionalLogger.log(f"❌ Insufficient data: {data_len} < {Config.TRAINING_MIN_SAMPLES} required", "ERROR", "ENGINE")
             else:
-                ProfessionalLogger.log(f"❌ Insufficient data: {data_len} < {Config.TRAINING_MIN_SAMPLES}", "ERROR", "ENGINE")
-        else:
-            ProfessionalLogger.log("❌ Failed to retrieve historical data", "ERROR", "ENGINE")
-    
-    def execute_trade_with_mtf_validation(self, signal, confidence, df_current, features, model_details):
-        """Execute trade with multi-timeframe validation"""
-        # First, get current multi-timeframe recommendation
-        mtf_analysis = self.perform_periodic_mtf_analysis()
-        
-        if not mtf_analysis:
-            ProfessionalLogger.log("No multi-timeframe analysis available", "WARNING", "ENGINE")
-            return None
-        
-        recommendation = mtf_analysis.get('recommendation', {})
-        mtf_signal = recommendation.get('trade_signal', 'HOLD')
-        mtf_confidence = recommendation.get('confidence', 0)
-        
-        # Check alignment with multi-timeframe recommendation
-        signal_map = {
-            1: 'BUY',
-            0: 'SELL'
-        }
-        
-        ml_signal = signal_map.get(signal, 'HOLD')
-        
-        ProfessionalLogger.log(f"Signal Comparison | ML: {ml_signal} ({confidence:.1%}) | MTF: {mtf_signal} ({mtf_confidence:.1%})", 
-                             "ANALYSIS", "ENGINE")
-        
-        # Check if signals align
-        if ml_signal != mtf_signal and mtf_signal != 'HOLD':
-            ProfessionalLogger.log(f"⚠ Signal misalignment: ML says {ml_signal}, MTF says {mtf_signal}", "WARNING", "ENGINE")
-            
-            # If MTF confidence is high, override ML signal
-            if mtf_confidence > 0.7 and confidence < 0.6:
-                ProfessionalLogger.log(f"Overriding ML with MTF signal (MTF confidence: {mtf_confidence:.1%})", "INFO", "ENGINE")
-                # Map MTF signal back to ML format
-                if mtf_signal == 'BUY':
-                    signal = 1
-                elif mtf_signal == 'SELL':
-                    signal = 0
-                confidence = mtf_confidence
-        
-        # Check overall timeframe alignment
-        alignment_scores = mtf_analysis.get('comparison', {}).get('alignment_scores', {})
-        overall_alignment = alignment_scores.get('overall', 0.5)
-        
-        if overall_alignment < Config.MIN_TIMEFRAME_AGREEMENT:
-            ProfessionalLogger.log(f"Poor timeframe alignment ({overall_alignment:.2f}), avoiding trade", "WARNING", "ENGINE")
-            return None
-        
-        # Adjust confidence based on timeframe alignment
-        adjusted_confidence = confidence * overall_alignment
-        
-        if adjusted_confidence < Config.MIN_CONFIDENCE:
-            ProfessionalLogger.log(f"Adjusted confidence too low: {adjusted_confidence:.1%}", "WARNING", "ENGINE")
-            return None
-        
-        # Execute trade
-        return self.execute_trade(signal, adjusted_confidence, df_current, features, model_details)
-    
+                ProfessionalLogger.log(f"❌ Failed to retrieve historical data from MT5", "ERROR", "ENGINE")
+
     def execute_trade(self, signal, confidence, df_current, features, model_details):
-        """Execute a trade"""
+        """Execute a trade based on signal"""
         try:
             symbol = Config.SYMBOL
             tick = mt5.symbol_info_tick(symbol)
@@ -1658,23 +2680,54 @@ class ProfessionalTradingEngine:
                 entry_price = tick.bid
                 order_type = mt5.ORDER_TYPE_SELL
             
-            # Calculate position size
+            # Calculate position size based on risk
             account = mt5.account_info()
             if not account:
                 ProfessionalLogger.log("Cannot get account info", "ERROR", "EXECUTOR")
                 return None
+
+            # --- AGGREGATE RISK CHECK ---
+            positions = mt5.positions_get(symbol=symbol)
+            current_total_risk = 0
             
-            # Risk calculation
+            symbol_info = mt5.symbol_info(symbol)
+            if not symbol_info:
+                ProfessionalLogger.log(f"Symbol {symbol} info not found", "ERROR", "EXECUTOR")
+                return None
+                
+            # Improved Contract Size Fallback (XAUUSD specific)
+            contract_size = getattr(symbol_info, 'trade_contract_size', 100000)
+            if not contract_size or contract_size == 0:
+                if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
+                    contract_size = 100
+                else:
+                    contract_size = 100000
+            
+            if positions:
+                for pos in positions:
+                    if pos.sl > 0:
+                        risk = abs(pos.price_open - pos.sl) * pos.volume * contract_size
+                        current_total_risk += risk
+            
+            max_total_risk = account.equity * Config.MAX_TOTAL_RISK_PERCENT
+            available_risk = max_total_risk - current_total_risk
+            
+            if available_risk <= 0:
+                ProfessionalLogger.log(f"Aggregate Risk Limit Reached: ${current_total_risk:.2f} >= ${max_total_risk:.2f}", "RISK", "ENGINE")
+                return None
+
+            # Calculate base risk for this trade
             risk_amount = account.equity * Config.RISK_PERCENT
             
-            # Adjust risk based on confidence
-            risk_adjustment = min(1.0, confidence / 0.8)  # Scale up to 80% confidence
-            risk_amount *= risk_adjustment
-            
+            # Cap risk to available aggregate room
+            if risk_amount > available_risk:
+                ProfessionalLogger.log(f"Scaling down risk to fit aggregate limit: {risk_amount:.2f} -> {available_risk:.2f}", "RISK", "ENGINE")
+                risk_amount = available_risk
+
             # Calculate stop loss and take profit
             atr = features.get('atr_percent', 0.001) * entry_price
             if atr == 0:
-                atr = entry_price * 0.002
+                atr = entry_price * 0.002  # Default 0.2%
             
             if signal == 1:  # BUY
                 stop_loss = entry_price - (atr * Config.ATR_SL_MULTIPLIER)
@@ -1683,13 +2736,16 @@ class ProfessionalTradingEngine:
                 stop_loss = entry_price + (atr * Config.ATR_SL_MULTIPLIER)
                 take_profit = entry_price - (atr * Config.ATR_TP_MULTIPLIER)
             
-            # Calculate position size
-            symbol_info = mt5.symbol_info(symbol)
-            contract_size = getattr(symbol_info, 'trade_contract_size', 100)
-            
+            # Calculate position size (Dynamic Volume Sizing)
             sl_distance = abs(entry_price - stop_loss)
+            
             if sl_distance > 0:
+                # Volume = Risk / (StopDistance * ContractSize)
                 position_size = risk_amount / (sl_distance * contract_size)
+                
+                # Confidence Scaling: Size * (Confidence / 0.8)
+                scaling_factor = confidence / 0.8
+                position_size = position_size * scaling_factor
                 
                 # Round to allowed lot size
                 if hasattr(symbol_info, 'volume_step'):
@@ -1697,9 +2753,12 @@ class ProfessionalTradingEngine:
                     position_size = round(position_size / step) * step
                 
                 # Ensure within limits
-                position_size = max(Config.MIN_VOLUME, min(position_size, Config.MAX_VOLUME))
+                if hasattr(symbol_info, 'volume_min'):
+                    position_size = max(position_size, symbol_info.volume_min)
+                if hasattr(symbol_info, 'volume_max'):
+                    position_size = min(position_size, symbol_info.volume_max)
             
-            # Execute order
+            # Execute the order
             result = self.order_executor.execute_trade(
                 symbol=symbol,
                 order_type=order_type,
@@ -1712,6 +2771,7 @@ class ProfessionalTradingEngine:
             )
             
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                # Store trade information
                 trade_data = {
                     'ticket': result.order,
                     'symbol': symbol,
@@ -1723,6 +2783,8 @@ class ProfessionalTradingEngine:
                     'take_profit': take_profit,
                     'open_time': int(time.time()),
                     'confidence': confidence,
+                    'features': features,
+                    'model_details': model_details,
                     'status': 'open'
                 }
                 
@@ -1739,15 +2801,15 @@ class ProfessionalTradingEngine:
             import traceback
             traceback.print_exc()
             return None
-    
+
     def run(self):
         """Main execution method"""
-        print("\n" + "=" * 80)
+        print("\n" + "=" * 70)
         print("🤖 PROFESSIONAL MT5 ALGORITHMIC TRADING SYSTEM")
-        print("📊 Multi-Timeframe Statistical Analysis | Live Trading")
-        print("=" * 80 + "\n")
+        print("📊 Advanced Statistical Analysis | Live Trading")
+        print("=" * 70 + "\n")
         
-        ProfessionalLogger.log("Starting professional trading system with multi-timeframe analysis...", "INFO", "ENGINE")
+        ProfessionalLogger.log("Starting professional trading system with statistical analysis...", "INFO", "ENGINE")
         
         # Connect to MT5
         if not self.connect_mt5():
@@ -1758,53 +2820,100 @@ class ProfessionalTradingEngine:
         
         # Start live trading
         self.run_live_trading()
-    
+
     def run_live_trading(self):
-        """Run live trading with multi-timeframe analysis"""
-        ProfessionalLogger.log("=" * 80, "INFO", "ENGINE")
-        ProfessionalLogger.log("STARTING LIVE TRADING WITH MULTI-TIMEFRAME ANALYSIS", "TRADE", "ENGINE")
-        ProfessionalLogger.log("=" * 80, "INFO", "ENGINE")
+        """Run live trading with statistical monitoring"""
+        ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
+        ProfessionalLogger.log("STARTING LIVE TRADING WITH STATISTICAL MONITORING", "TRADE", "ENGINE")
+        ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
         
         try:
             while True:
                 self.run_periodic_tasks()
                 
-                # Get current data
-                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.PRIMARY_TIMEFRAME, 0, 100)
-                if rates is None or len(rates) < 50:
-                    ProfessionalLogger.log("Failed to get rates, retrying...", "WARNING", "ENGINE")
-                    time.sleep(60)
+                # FIXED: Ensure sufficient buffer for Feature Engineering (e.g. 200 SMA)
+                # Hardcoded '100' bars was too short for TREND_MA=200
+                required_lookback = max(500, Config.TREND_MA * 2) 
+                
+                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
+                if rates is None or len(rates) < Config.TREND_MA + 10:
+                    ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
+                    time.sleep(10) # Short retry
                     continue
                 
                 df_current = pd.DataFrame(rates)
                 
-                # Get model prediction
+                # Get model prediction with statistical validation
                 signal, confidence, features, model_details = self.model.predict(df_current)
                 
+                # ==========================================
+                # NEW: ADAPTIVE EXIT LOGIC (Active Cashout System)
+                # ==========================================
+                # Calculate features specifically for the exit manager
+                # (We do this here to ensure the manager has access to indicators like RSI, ADX)
+                df_features = self.feature_engine.calculate_features(df_current)
+                
+                if self.active_positions:
+                    self.exit_manager.manage_positions(
+                        df_features, 
+                        self.active_positions, 
+                        signal, 
+                        confidence
+                    )
+                # ==========================================
+
                 if signal is None:
                     # No valid signal
                     if self.iteration % 30 == 0:
                         tick = mt5.symbol_info_tick(Config.SYMBOL)
                         if tick:
                             price = tick.ask
-                            positions = len(self.active_positions)
+                            positions = self.get_current_positions()
                             ProfessionalLogger.log(f"Waiting for signal | Price: {price:.2f} | Positions: {positions}", 
                                                  "INFO", "ENGINE")
                     time.sleep(60)
                     continue
                 
-                # Log prediction
+                # Check model agreement
+                agreement = 0
+                if model_details:
+                    predictions = [m['prediction'] for m in model_details.values() 
+                                 if m['prediction'] != -1]
+                    if predictions:
+                        agreement = predictions.count(signal) / len(predictions)
+                
+                # Log prediction details
                 signal_type = "BUY" if signal == 1 else "SELL"
-                ProfessionalLogger.log(f"Signal: {signal_type} | Confidence: {confidence:.1%}", "ANALYSIS", "ENGINE")
+                status_msg = (f"Signal Analysis | {signal_type} | "
+                             f"Confidence: {confidence:.1%} | "
+                             f"Agreement: {agreement:.0%} | "
+                             f"Price: {df_current['close'].iloc[-1]:.2f}")
+                ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
                 
-                # Check if we should execute
-                if confidence >= Config.MIN_CONFIDENCE:
-                    ProfessionalLogger.log(f"🎯 High-confidence {signal_type} signal detected!", "SUCCESS", "ENGINE")
+                # Log key features
+                if features:
+                    key_features = {
+                        'rsi': features.get('rsi_normalized', 0) * 50 + 50,
+                        'volatility': features.get('volatility', 0),
+                        'regime': features.get('regime_encoded', 0)
+                    }
+                    ProfessionalLogger.log(f"Key Features: RSI={key_features['rsi']:.1f} | "
+                                         f"Vol={key_features['volatility']:.4f} | "
+                                         f"Regime={key_features['regime']}", "DATA", "ENGINE")
+                
+                # Execute trade if conditions are met
+                if (confidence >= Config.MIN_CONFIDENCE and 
+                    agreement >= Config.MIN_ENSEMBLE_AGREEMENT):
                     
-                    # Execute with multi-timeframe validation
-                    self.execute_trade_with_mtf_validation(signal, confidence, df_current, features, model_details)
+                    ProfessionalLogger.log(f"🎯 High-confidence {signal_type} signal confirmed!", "SUCCESS", "ENGINE")
+                    
+                    # Execute trade
+                    self.execute_trade(signal, confidence, df_current, features, model_details)
                 
-                time.sleep(60)
+                # Update performance metrics
+                self.update_performance_metrics()
+                
+                time.sleep(60)  # Wait 1 minute before next iteration
                 
         except KeyboardInterrupt:
             ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
@@ -1813,20 +2922,176 @@ class ProfessionalTradingEngine:
             import traceback
             traceback.print_exc()
         finally:
+            # Final performance report
+            self.print_performance_report()
+            
             mt5.shutdown()
             ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
+# ==========================================
+# ADAPTIVE EXIT MANAGER (Smart Cashout)
+# ==========================================
+class AdaptiveExitManager:
+    """
+    Manages open positions dynamically to prevent giving back profits.
+    Active monitoring of:
+    1. Technical Exhaustion (RSI, Bollinger Bands)
+    2. Trend Weakness (ADX drop)
+    3. Profit Protection (Trailing Stops)
+    4. Time Decay (Stagnation)
+    """
+    def __init__(self, executor):
+        self.executor = executor
+
+    def manage_positions(self, df, active_positions, current_model_signal, current_confidence):
+        """
+        Main loop to check all active positions against exit logic.
+        """
+        if not active_positions or df.empty:
+            return
+
+        # Get latest market data
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # Calculate dynamic metrics
+        atr = latest.get('atr', 0)
+        close_price = latest['close']
+        rsi = latest.get('rsi', 50)
+        adx = latest.get('adx', 0)
+        
+        # Iterate through a copy of keys to avoid modification errors during iteration
+        for ticket, trade in list(active_positions.items()):
+            
+            # Skip if trade is too new (give it breathing room)
+            duration_bars = (int(time.time()) - trade['open_time']) / (Config.TIMEFRAME * 60 if hasattr(Config, 'TIMEFRAME') else 900)
+            if duration_bars < 2: 
+                continue
+
+            symbol = trade['symbol']
+            trade_type = trade['type'] # 'BUY' or 'SELL'
+            entry_price = trade['open_price']
+            current_sl = trade['stop_loss']
+            current_tp = trade['take_profit']
+            
+            # 1. MODEL INVALIDATION CHECK
+            # If the model explicitly predicts the opposite with high confidence, exit immediately.
+            model_flip = False
+            if trade_type == 'BUY' and current_model_signal == 0 and current_confidence > 0.65:
+                ProfessionalLogger.log(f"📉 Model flipped to BEARISH (Conf: {current_confidence:.2f}) - Exiting BUY #{ticket}", "EXIT", "MANAGER")
+                self.executor.close_position(ticket, symbol)
+                continue
+            elif trade_type == 'SELL' and current_model_signal == 1 and current_confidence > 0.65:
+                ProfessionalLogger.log(f"📈 Model flipped to BULLISH (Conf: {current_confidence:.2f}) - Exiting SELL #{ticket}", "EXIT", "MANAGER")
+                self.executor.close_position(ticket, symbol)
+                continue
+
+            # 2. PROFIT PROTECTION (Smart Trailing)
+            # Calculate current floating profit in points
+            if trade_type == 'BUY':
+                profit_points = close_price - entry_price
+                distance_to_sl = close_price - current_sl
+            else:
+                profit_points = entry_price - close_price
+                distance_to_sl = current_sl - close_price
+
+            # Define R (Initial Risk)
+            initial_risk = abs(entry_price - current_sl)
+            if initial_risk == 0: initial_risk = atr # Safety
+            
+            r_multiple = profit_points / initial_risk
+
+            new_sl = current_sl
+            sl_changed = False
+
+            # --- Logic A: Breakeven at 1R ---
+            if r_multiple > 1.0:
+                # Move to Breakeven + small buffer
+                if trade_type == 'BUY':
+                    be_price = entry_price + (atr * 0.1)
+                    if new_sl < be_price:
+                        new_sl = be_price
+                        sl_changed = True
+                        ProfessionalLogger.log(f"🛡️ Locked Breakeven for #{ticket} (1R reached)", "RISK", "MANAGER")
+                else:
+                    be_price = entry_price - (atr * 0.1)
+                    if new_sl > be_price:
+                        new_sl = be_price
+                        sl_changed = True
+                        ProfessionalLogger.log(f"🛡️ Locked Breakeven for #{ticket} (1R reached)", "RISK", "MANAGER")
+
+            # --- Logic B: Tight Trailing at 2R+ (Don't be greedy) ---
+            if r_multiple > 2.0:
+                # Trail at 1 ATR distance (tight)
+                if trade_type == 'BUY':
+                    trail_price = close_price - (atr * 1.0)
+                    if trail_price > new_sl:
+                        new_sl = trail_price
+                        sl_changed = True
+                else:
+                    trail_price = close_price + (atr * 1.0)
+                    if trail_price < new_sl:
+                        new_sl = trail_price
+                        sl_changed = True
+
+            # --- Logic C: Technical Exhaustion (Overvaluation) ---
+            # If RSI is screaming overbought/oversold, tighten SL dramatically
+            is_exhausted = False
+            if trade_type == 'BUY' and rsi > 75:
+                is_exhausted = True
+            elif trade_type == 'SELL' and rsi < 25:
+                is_exhausted = True
+            
+            if is_exhausted:
+                # Tighten to candle low/high
+                if trade_type == 'BUY':
+                    tight_stop = latest['low']
+                    if tight_stop > new_sl: 
+                        new_sl = tight_stop
+                        sl_changed = True
+                        ProfessionalLogger.log(f"⚠️ RSI Exhaustion ({rsi:.1f}) - Tightening Stop on #{ticket}", "RISK", "MANAGER")
+                else:
+                    tight_stop = latest['high']
+                    if tight_stop < new_sl:
+                        new_sl = tight_stop
+                        sl_changed = True
+                        ProfessionalLogger.log(f"⚠️ RSI Exhaustion ({rsi:.1f}) - Tightening Stop on #{ticket}", "RISK", "MANAGER")
+
+            # --- Logic D: Trend Death (ADX Drop) ---
+            # If we are in a profit but ADX drops below 20, the trend is likely dead.
+            if profit_points > 0 and adx < 20 and prev['adx'] > 20:
+                ProfessionalLogger.log(f"💤 Trend Dying (ADX < 20) - Closing #{ticket} to free capital", "EXIT", "MANAGER")
+                self.executor.close_position(ticket, symbol)
+                continue
+
+            # Apply SL modifications if needed
+            if sl_changed:
+                self.executor.modify_position(ticket, symbol, new_sl, current_tp)
+                # Update local memory
+                trade['stop_loss'] = new_sl
 
 # ==========================================
 # MAIN FUNCTION
 # ==========================================
 def main():
     """Main entry point"""
+    # Add diagnostic information
     ProfessionalLogger.log("Starting professional trading system...", "INFO", "ENGINE")
     
-    # Test MT5 connection
+    # Test MT5 connection and symbol info
     if not mt5.initialize():
         ProfessionalLogger.log("MT5 initialization failed", "ERROR", "ENGINE")
         return
+    
+    # Get symbol information
+    symbol_info = mt5.symbol_info(Config.SYMBOL)
+    if symbol_info:
+        ProfessionalLogger.log(f"Symbol info for {Config.SYMBOL}:", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"  Volume min: {getattr(symbol_info, 'volume_min', 'N/A')}", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"  Volume max: {getattr(symbol_info, 'volume_max', 'N/A')}", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"  Volume step: {getattr(symbol_info, 'volume_step', 'N/A')}", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"  Trade contract size: {getattr(symbol_info, 'trade_contract_size', 'N/A')}", "INFO", "ENGINE")
+    else:
+        ProfessionalLogger.log(f"Could not get symbol info for {Config.SYMBOL}", "ERROR", "ENGINE")
     
     mt5.shutdown()
     

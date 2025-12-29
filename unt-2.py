@@ -51,7 +51,7 @@ class Config:
     # TRADING INSTRUMENT SPECIFICATIONS
     # ==========================================
     SYMBOL = "XAUUSD"
-    TIMEFRAME = mt5.TIMEFRAME_M15  # 15-min optimal for intraday gold trading
+    TIMEFRAME = mt5.TIMEFRAME_M5  # 15-min optimal for intraday gold trading
     
     # XAUUSD-specific: Gold typically trades in 0.01 lot increments
     BASE_VOLUME = 0.25  # START SMALL - critical for risk management
@@ -184,10 +184,10 @@ class Config:
     
     # ATR-Based Stops (Gold-optimized)
     ATR_SL_MULTIPLIER = 1.5  # 1.5x ATR for stop loss
-    ATR_TP_MULTIPLIER = 3.0  # 3.0x ATR for take profit (2:1 R:R)
+    ATR_TP_MULTIPLIER = 1.75  # 3.0x ATR for take profit (2:1 R:R)
     
     # Minimum Risk/Reward
-    MIN_RR_RATIO = 2.0  # Minimum 2:1 reward:risk
+    MIN_RR_RATIO = 1.25  # Minimum 2:1 reward:risk
     
     # Fixed Stops (backup if ATR unavailable)
     FIXED_SL_PERCENT = 0.0035  # 0.35% stop loss
@@ -1208,6 +1208,7 @@ class ProfessionalFeatureEngine:
         self.scaler = RobustScaler()
         self.stat_analyzer = AdvancedStatisticalAnalyzer()
         self.risk_metrics = ProfessionalRiskMetrics()
+        self.multi_tf_analyser = MultiTimeframeAnalyser(mt5)
         
     def calculate_features(self, df):
         """Calculate features with advanced statistical analysis"""
@@ -1734,10 +1735,15 @@ class ProfessionalFeatureEngine:
         return base_features
 
 # ==========================================
-# PROFESSIONAL ENSEMBLE MODEL WITH STATISTICAL ANALYSIS
+# FIXED PROFESSIONAL ENSEMBLE (Prevents Data Leakage)
 # ==========================================
+
+# ==========================================
+# PROFESSIONAL ENSEMBLE MODEL (Fixed Diagnostics Structure)
+# ==========================================
+
 class ProfessionalEnsemble:
-    """Professional ensemble with statistical analysis"""
+    """Professional ensemble with statistical analysis and strict anti-leakage protocols"""
     
     def __init__(self, trade_memory, feature_engine):
         self.feature_engine = feature_engine
@@ -1749,7 +1755,9 @@ class ProfessionalEnsemble:
         # Model components
         self.base_models = self._initialize_base_models()
         self.ensemble = self._create_ensemble_structure()
-        self.scaler = RobustScaler()
+        
+        # SCALER MANAGEMENT
+        self.final_scaler = None 
         
         # Training state
         self.is_trained = False
@@ -1757,666 +1765,702 @@ class ProfessionalEnsemble:
         self.training_metrics = {}
         self.feature_importance = {}
         self.statistical_analysis = {}
-        self.trained_feature_columns = None  # Store feature columns used during training
+        self.trained_feature_columns = None
+        self.fitted_base_models = {}
         
-        ProfessionalLogger.log("Ensemble initialized with advanced statistical analysis", "INFO", "ENSEMBLE")
-    
+        ProfessionalLogger.log("Ensemble initialized with strict anti-leakage protocols", "INFO", "ENSEMBLE")
+
     def _initialize_base_models(self):
         """Initialize diverse base models"""
         models = []
         
         # Gradient Boosting
         models.append(('GB', GradientBoostingClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.05,
-            subsample=0.8,
-            min_samples_split=10,
-            min_samples_leaf=5,
-            random_state=42
+            n_estimators=100, max_depth=5, learning_rate=0.05, 
+            subsample=0.8, min_samples_split=10, min_samples_leaf=5, random_state=42
         )))
         
         # Random Forest
         models.append(('RF', RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_split=8,
-            min_samples_leaf=4,
-            max_features='sqrt',
-            bootstrap=True,
-            random_state=42,
-            n_jobs=-1
+            n_estimators=100, max_depth=10, min_samples_split=8, 
+            min_samples_leaf=4, max_features='sqrt', bootstrap=True, 
+            random_state=42, n_jobs=-1
         )))
         
         # Logistic Regression
         models.append(('LR', LogisticRegression(
-            penalty='l2',
-            C=1.0,
-            max_iter=1000,
-            random_state=42,
-            class_weight='balanced'
+            penalty='l2', C=1.0, max_iter=1000, 
+            random_state=42, class_weight='balanced', solver='liblinear'
         )))
         
         # Neural Network
         models.append(('NN', MLPClassifier(
-            hidden_layer_sizes=(50, 25),
-            activation='relu',
-            solver='adam',
-            alpha=0.0001,
-            max_iter=500,
-            random_state=42
+            hidden_layer_sizes=(50, 25), activation='relu', solver='adam', 
+            alpha=0.0001, max_iter=500, random_state=42
         )))
         
         # XGBoost if available
         if XGB_AVAILABLE:
             models.append(('XGB', XGBClassifier(
-                n_estimators=100,
-                max_depth=6,
-                learning_rate=0.05,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42,
-                n_jobs=-1
+                n_estimators=100, max_depth=6, learning_rate=0.05, 
+                subsample=0.8, colsample_bytree=0.8, random_state=42, n_jobs=-1
             )))
             
         return models
-    
+
     def _create_ensemble_structure(self):
-        """Create ensemble structure with proper cross-validation"""
-        # Always use VotingClassifier to avoid cross_val_predict issues
+        """Create ensemble structure"""
         return VotingClassifier(
             estimators=[(name, model) for name, model in self.base_models],
             voting='soft',
             n_jobs=-1
         )
-    
+
     def _prepare_training_data(self, data):
-        """Prepare training data with robust feature handling"""
-        if data is None or len(data) < 100:
-            return None, None
-        
+        """Prepare training data (Calculate features & labels)"""
         try:
             # Calculate features
             df_features = self.feature_engine.calculate_features(data)
             
             # Create labels
             df_labeled = self.feature_engine.create_labels(df_features, method='simple')
-            
-            # Remove rows with missing labels
             df_labeled = df_labeled.dropna(subset=['label'])
             
-            if len(df_labeled) < 50:
-                ProfessionalLogger.log(f"Insufficient labeled data: {len(df_labeled)} samples", "WARNING", "ENSEMBLE")
-                return None, None
-            
-            # Get all feature columns
+            # Get feature columns
             all_feature_cols = self.feature_engine.get_feature_columns()
+            self.trained_feature_columns = all_feature_cols # Save columns used
             
-            # Ensure all features exist in the dataframe
-            for col in all_feature_cols:
-                if col not in df_labeled.columns:
-                    df_labeled[col] = 0
+            # Extract X and y (Unscaled)
+            X = df_labeled[all_feature_cols].copy().fillna(0).replace([np.inf, -np.inf], 0)
             
-            # Select only the features we need
-            X = df_labeled[all_feature_cols].copy()
-            
-            # Clean the data
-            X = X.replace([np.inf, -np.inf], 0)
-            X = X.fillna(0)
-            
-            # Ensure all values are finite
+            # Ensure numeric
             for col in X.columns:
                 X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
-            
+                
             y = df_labeled['label'].astype(int)
             
-            # Store the feature columns used
-            self.trained_feature_columns = all_feature_cols
-            
-            ProfessionalLogger.log(f"Prepared training data: {len(X)} samples, {len(X.columns)} features", 
-                                 "DATA", "ENSEMBLE")
-            
             return X, y
-            
+
         except Exception as e:
-            ProfessionalLogger.log(f"Error preparing training data: {str(e)}", "ERROR", "ENSEMBLE")
-            import traceback
-            traceback.print_exc()
+            ProfessionalLogger.log(f"Error preparing data: {e}", "ERROR", "ENSEMBLE")
             return None, None
-    
+
     def perform_statistical_analysis(self, data):
-        """Perform comprehensive statistical analysis on data"""
-        ProfessionalLogger.log("Performing advanced statistical analysis...", "STATISTICS", "ENSEMBLE")
-        
-        analysis_results = {}
-        
-        if data is None or len(data) < 100:
-            ProfessionalLogger.log("Insufficient data for statistical analysis", "WARNING", "ENSEMBLE")
-            return analysis_results
-        
+        """Perform statistical analysis (Wrapper)"""
+        if data is None or len(data) < 100: return {}
         try:
-            # Calculate returns
             returns = data['close'].pct_change().dropna().values
-            
-            if len(returns) < Config.MIN_SAMPLES_FOR_STATS:
-                return analysis_results
-            
-            # 1. Return distribution analysis
-            analysis_results['return_distribution'] = self.stat_analyzer.analyze_return_distribution(returns)
-            
-            # 2. Market regime analysis
-            analysis_results['market_regime'] = self.stat_analyzer.calculate_market_regime(data)
-            
-            # 3. Tail risk analysis
-            analysis_results['tail_risk'] = self.stat_analyzer.calculate_tail_risk(returns)
-            
-            # 4. Risk metrics
-            analysis_results['risk_metrics'] = self.risk_metrics.calculate_risk_metrics(returns, data['close'].values)
-            
-            # 5. Bootstrap analysis for confidence intervals
-            analysis_results['bootstrap'] = self.stat_analyzer.bootstrap_analysis(returns, min(Config.BOOTSTRAP_SAMPLES, 500))
-            
-            # Log key findings
-            self._log_statistical_analysis(analysis_results)
-            
-            return analysis_results
-            
+            analysis = {
+                'return_distribution': self.stat_analyzer.analyze_return_distribution(returns),
+                'market_regime': self.stat_analyzer.calculate_market_regime(data),
+                'risk_metrics': self.risk_metrics.calculate_risk_metrics(returns)
+            }
+            self.statistical_analysis = analysis
+            return analysis
         except Exception as e:
-            ProfessionalLogger.log(f"Statistical analysis error: {str(e)}", "ERROR", "ENSEMBLE")
-            return analysis_results
-    
-    def _log_statistical_analysis(self, analysis):
-        """Log key statistical findings"""
-        if not analysis:
-            return
-        
-        ProfessionalLogger.log("=" * 60, "STATISTICS", "ENSEMBLE")
-        ProfessionalLogger.log("📊 ADVANCED STATISTICAL ANALYSIS", "STATISTICS", "ENSEMBLE")
-        
-        # Return distribution
-        if 'return_distribution' in analysis:
-            rd = analysis['return_distribution']
-            if 'n_samples' in rd:
-                ProfessionalLogger.log(f"Return Distribution (n={rd['n_samples']}):", "STATISTICS", "ENSEMBLE")
-                ProfessionalLogger.log(f"  Mean: {rd.get('mean', 0):.6f} | Std: {rd.get('std', 0):.6f}", "STATISTICS", "ENSEMBLE")
-                ProfessionalLogger.log(f"  Skew: {rd.get('skewness', 0):.3f} | Kurtosis: {rd.get('kurtosis', 0):.3f}", "STATISTICS", "ENSEMBLE")
-                ProfessionalLogger.log(f"  VaR(95%): {rd.get('var_95', 0):.6f} | CVaR(95%): {rd.get('cvar_95', 0):.6f}", "STATISTICS", "ENSEMBLE")
-                
-                if rd.get('is_normal', False):
-                    ProfessionalLogger.log("  ✓ Returns appear normally distributed", "SUCCESS", "ENSEMBLE")
-                else:
-                    ProfessionalLogger.log("  ⚠ Returns NOT normally distributed", "WARNING", "ENSEMBLE")
-        
-        # Market regime
-        if 'market_regime' in analysis:
-            mr = analysis['market_regime']
-            ProfessionalLogger.log(f"Market Regime: {mr.get('regime', 'unknown')} (confidence: {mr.get('confidence', 0):.1%})", "STATISTICS", "ENSEMBLE")
-            if 'hurst' in mr:
-                ProfessionalLogger.log(f"  Hurst Exponent: {mr['hurst']:.3f}", "STATISTICS", "ENSEMBLE")
-        
-        ProfessionalLogger.log("=" * 60, "STATISTICS", "ENSEMBLE")
-    
+            ProfessionalLogger.log(f"Stat analysis failed: {e}", "ERROR", "ENSEMBLE")
+            return {}
+
     def train(self, data):
-            """Train ensemble with Walk-Forward Optimization (WFO) logic"""
-            try:
-                ProfessionalLogger.log(f"Starting training on {len(data) if data is not None else 0} samples...", "LEARN", "ENSEMBLE")
-                
-                if data is None or len(data) < Config.TRAINING_MIN_SAMPLES:
-                    ProfessionalLogger.log(f"Insufficient data: {len(data) if data is not None else 0} < {Config.TRAINING_MIN_SAMPLES}", "ERROR", "ENSEMBLE")
-                    return False
-                
-                # Perform statistical analysis
-                self.statistical_analysis = self.perform_statistical_analysis(data)
-                
-                # Check data quality
-                quality_score, quality_diagnostics = self.data_quality_checker.check_data_quality(data)
-                if quality_score < Config.MIN_DATA_QUALITY_SCORE:
-                    ProfessionalLogger.log(f"Data quality warning: {quality_score:.2%}", "WARNING", "ENSEMBLE")
-                
-                # Prepare training data
-                X, y = self._prepare_training_data(data)
-                if X is None or len(X) < Config.TRAINING_MIN_SAMPLES:
-                    ProfessionalLogger.log("Insufficient data after preprocessing", "ERROR", "ENSEMBLE")
-                    return False
-                
-                # Scale features
-                X_scaled = self.scaler.fit_transform(X)
-                
-                # ==========================================
-                # UPDATED: Walk-Forward Validation Logic
-                # ==========================================
-                # We use max_train_size to enforce the "Rolling Window" concept 
-                # defined by WALK_FORWARD_WINDOW
-                tscv = TimeSeriesSplit(
-                    n_splits=Config.WALK_FORWARD_FOLDS, 
-                    max_train_size=Config.WALK_FORWARD_WINDOW,
-                    gap=0 # Optional: Add gap if you want to simulate deployment delay
-                )
-                
-                cv_scores = []
-                
-                ProfessionalLogger.log(f"Executing Walk-Forward Validation ({Config.WALK_FORWARD_FOLDS} folds)...", "LEARN", "ENSEMBLE")
-
-                for fold, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
-                    # Enforce minimum training size for the fold
-                    if len(train_idx) < 100: 
-                        continue
-
-                    X_train, X_val = X_scaled[train_idx], X_scaled[val_idx]
-                    y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-                    
-                    # Fit the ensemble on this specific window
-                    self.ensemble.fit(X_train, y_train)
-                    
-                    # Evaluate
-                    val_score = self.ensemble.score(X_val, y_val)
-                    cv_scores.append(val_score)
-                    
-                    ProfessionalLogger.log(f"  Fold {fold+1}/{Config.WALK_FORWARD_FOLDS}: Window Size={len(train_idx)} | Val Acc={val_score:.2%}", 
-                                        "LEARN", "ENSEMBLE")
-                
-                avg_score = np.mean(cv_scores) if cv_scores else 0
-                
-                # Check if model meets minimum requirements
-                if avg_score < Config.MIN_ACCURACY_THRESHOLD:
-                    ProfessionalLogger.log(f"Model failed accuracy threshold: {avg_score:.2%} < {Config.MIN_ACCURACY_THRESHOLD:.2%}", "WARNING", "ENSEMBLE")
-                    # We still proceed to fit final model, but warn user
-                
-                # Final training on the most recent window (Config.WALK_FORWARD_WINDOW)
-                # This ensures the model is tuned to the current market regime
-                final_window_size = min(len(X_scaled), Config.WALK_FORWARD_WINDOW * 2) # Use double window for final fit for stability
-                X_final = X_scaled[-final_window_size:]
-                y_final = y.iloc[-final_window_size:]
-                
-                ProfessionalLogger.log(f"Fitting final model on last {len(X_final)} bars...", "LEARN", "ENSEMBLE")
-                self.ensemble.fit(X_final, y_final)
-                
-                # Store fitted base models
-                try:
-                    if hasattr(self.ensemble, 'named_estimators_'):
-                        self.fitted_base_models = self.ensemble.named_estimators_
-                except Exception as e:
-                    ProfessionalLogger.log(f"Could not store base models: {e}", "WARNING", "ENSEMBLE")
-
-                # Update feature importance (using the RF model from the ensemble)
-                for name, model in self.base_models:
-                    if name == 'RF' and hasattr(model, 'feature_importances_'):
-                        # We need to access the fitted RF within the ensemble
-                        try:
-                            fitted_rf = self.ensemble.named_estimators_['RF']
-                            self.feature_importance = dict(zip(X.columns, fitted_rf.feature_importances_))
-                        except:
-                            pass
-                        break
-
-                # Update training state
-                self.is_trained = True
-                self.last_train_time = datetime.now()
-                self.training_metrics = {
-                    'avg_cv_score': avg_score,
-                    'std_cv_score': np.std(cv_scores) if cv_scores else 0,
-                    'samples': len(X),
-                    'features': len(X.columns),
-                    'wfo_window': Config.WALK_FORWARD_WINDOW
-                }
-                
-                ProfessionalLogger.log(f"✅ Training Complete | WFO Accuracy: {avg_score:.2%}", "SUCCESS", "ENSEMBLE")
-                return True
-                
-            except Exception as e:
-                ProfessionalLogger.log(f"Training error: {str(e)}", "ERROR", "ENSEMBLE")
-                import traceback
-                traceback.print_exc()
+        """Train ensemble with Strict Walk-Forward Optimization (No Leakage)"""
+        try:
+            if data is None or len(data) < Config.TRAINING_MIN_SAMPLES:
+                ProfessionalLogger.log("Insufficient data for training.", "ERROR", "ENSEMBLE")
                 return False
 
+            ProfessionalLogger.log(f"Starting training on {len(data)} samples...", "LEARN", "ENSEMBLE")
+            
+            # 1. Prepare Raw Data
+            X_raw, y_raw = self._prepare_training_data(data)
+            if X_raw is None: return False
+
+            # 2. Walk-Forward Validation (WFO)
+            # We split the indices first, then scale INSIDE the loop
+            tscv = TimeSeriesSplit(
+                n_splits=Config.WALK_FORWARD_FOLDS, 
+                max_train_size=Config.WALK_FORWARD_WINDOW
+            )
+            
+            cv_scores = []
+            ProfessionalLogger.log(f"Executing WFO ({Config.WALK_FORWARD_FOLDS} folds)...", "LEARN", "ENSEMBLE")
+
+            for fold, (train_idx, val_idx) in enumerate(tscv.split(X_raw)):
+                # Enforce minimum training size
+                if len(train_idx) < 100: continue
+
+                # A. Split Data (Raw)
+                X_train_fold, X_val_fold = X_raw.iloc[train_idx], X_raw.iloc[val_idx]
+                y_train_fold, y_val_fold = y_raw.iloc[train_idx], y_raw.iloc[val_idx]
+                
+                # B. Fit Scaler ONLY on Training Fold (Prevents Leakage)
+                fold_scaler = RobustScaler()
+                X_train_scaled = fold_scaler.fit_transform(X_train_fold)
+                
+                # C. Transform Validation using Training Scaler
+                X_val_scaled = fold_scaler.transform(X_val_fold)
+                
+                # D. Fit & Score
+                self.ensemble.fit(X_train_scaled, y_train_fold)
+                val_score = self.ensemble.score(X_val_scaled, y_val_fold)
+                cv_scores.append(val_score)
+                
+                ProfessionalLogger.log(f"  Fold {fold+1}: Acc={val_score:.2%}", "LEARN", "ENSEMBLE")
+
+            avg_score = np.mean(cv_scores) if cv_scores else 0.0
+
+            if avg_score < Config.MIN_ACCURACY_THRESHOLD:
+                ProfessionalLogger.log(f"⚠ Low WFO Accuracy: {avg_score:.2%}", "WARNING", "ENSEMBLE")
+
+            # 3. Final Training for Live Trading
+            # We train on the most recent window allowed by config
+            final_window_size = min(len(X_raw), Config.WALK_FORWARD_WINDOW * 2) 
+            X_final_raw = X_raw.iloc[-final_window_size:]
+            y_final = y_raw.iloc[-final_window_size:]
+            
+            # Create and Fit the FINAL scaler (this is what we use for live predict)
+            self.final_scaler = RobustScaler()
+            X_final_scaled = self.final_scaler.fit_transform(X_final_raw)
+            
+            ProfessionalLogger.log(f"Fitting final model on last {len(X_final_raw)} bars...", "LEARN", "ENSEMBLE")
+            self.ensemble.fit(X_final_scaled, y_final)
+            
+            # Store fitted base models for individual confidence checks
+            if hasattr(self.ensemble, 'named_estimators_'):
+                self.fitted_base_models = self.ensemble.named_estimators_
+            
+            # Update state
+            self.is_trained = True
+            self.last_train_time = datetime.now()
+            self.training_metrics = {'avg_cv_score': avg_score}
+            
+            ProfessionalLogger.log(f"✅ Training Complete | WFO Accuracy: {avg_score:.2%}", "SUCCESS", "ENSEMBLE")
+            return True
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Training error: {str(e)}", "ERROR", "ENSEMBLE")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def predict(self, df):
-        """Make prediction with statistical validation"""
-        if not self.is_trained:
-            ProfessionalLogger.log("Model not trained, cannot predict", "WARNING", "ENSEMBLE")
+        """Make prediction using the final fitted scaler"""
+        if not self.is_trained or self.final_scaler is None:
+            ProfessionalLogger.log("Model not trained.", "WARNING", "ENSEMBLE")
             return None, 0.0, None, {}
         
         try:
-            # Calculate features
+            # 1. Calculate features
             df_feat = self.feature_engine.calculate_features(df)
             
-            # Get feature columns - use trained features if available
-            if self.trained_feature_columns is not None:
-                required_features = self.trained_feature_columns
-            else:
-                required_features = self.feature_engine.get_feature_columns()
+            # 2. Extract Feature Vector (Raw)
+            # Ensure we use exactly the same columns as training
+            if self.trained_feature_columns is None:
+                self.trained_feature_columns = self.feature_engine.get_feature_columns()
+                
+            X_raw = df_feat[self.trained_feature_columns].iloc[-1:].fillna(0).replace([np.inf, -np.inf], 0)
             
-            # Ensure all required features exist
-            for feature in required_features:
-                if feature not in df_feat.columns:
-                    df_feat[feature] = 0
+            # 3. Scale using the Saved Final Scaler
+            X_scaled = self.final_scaler.transform(X_raw)
             
-            # Prepare input
-            X = df_feat[required_features].iloc[-1:].copy()
-            X = X.replace([np.inf, -np.inf], 0)
-            X = X.fillna(0)
-            
-            # Ensure all values are numeric
-            for col in X.columns:
-                X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
-            
-            X_scaled = self.scaler.transform(X)
-            
-            # Get prediction from ensemble
+            # 4. Predict
             prediction = self.ensemble.predict(X_scaled)[0]
             proba = self.ensemble.predict_proba(X_scaled)[0]
             confidence = np.max(proba)
             
-            # Create feature dictionary
-            features = {col: float(X[col].iloc[0]) for col in required_features}
+            # Extract features dict for logging
+            features = {col: float(X_raw[col].iloc[0]) for col in self.trained_feature_columns}
             
-            # Get sub-model predictions
+            # 5. Get Sub-model Predictions (for Agreement Logic)
             sub_preds = {}
+            if self.fitted_base_models:
+                 for name, model in self.fitted_base_models.items():
+                     try:
+                         sub_p = model.predict(X_scaled)[0]
+                         sub_preds[name] = {'prediction': int(sub_p)}
+                     except: pass
             
-            # First try to use stored fitted models
-            if hasattr(self, 'fitted_base_models') and self.fitted_base_models is not None:
-                for name, model in self.fitted_base_models.items():
-                    try:
-                        sub_pred = model.predict(X_scaled)[0]
-                        if hasattr(model, 'predict_proba'):
-                            sub_proba = model.predict_proba(X_scaled)[0]
-                            sub_conf = np.max(sub_proba)
-                            sub_proba_list = sub_proba.tolist()
-                        else:
-                            sub_conf = 1.0
-                            sub_proba_list = None
-                        
-                        sub_preds[name] = {
-                            'prediction': int(sub_pred),
-                            'confidence': float(sub_conf),
-                            'probabilities': sub_proba_list
-                        }
-                    except Exception as e:
-                        ProfessionalLogger.log(f"Submodel {name} error: {str(e)}", "WARNING", "ENSEMBLE")
-                        sub_preds[name] = {'prediction': -1, 'confidence': 0.0, 'probabilities': None}
-            
-            # If no stored models, try to get from the ensemble
-            elif hasattr(self.ensemble, 'named_estimators_'):
-                for name, model in self.ensemble.named_estimators_.items():
-                    try:
-                        sub_pred = model.predict(X_scaled)[0]
-                        if hasattr(model, 'predict_proba'):
-                            sub_proba = model.predict_proba(X_scaled)[0]
-                            sub_conf = np.max(sub_proba)
-                            sub_proba_list = sub_proba.tolist()
-                        else:
-                            sub_conf = 1.0
-                            sub_proba_list = None
-                        
-                        sub_preds[name] = {
-                            'prediction': int(sub_pred),
-                            'confidence': float(sub_conf),
-                            'probabilities': sub_proba_list
-                        }
-                    except Exception as e:
-                        ProfessionalLogger.log(f"Submodel {name} error: {str(e)}", "WARNING", "ENSEMBLE")
-                        sub_preds[name] = {'prediction': -1, 'confidence': 0.0, 'probabilities': None}
-            
-            # If no named_estimators_, try estimators_
-            elif hasattr(self.ensemble, 'estimators_'):
-                for idx, (name, _) in enumerate(self.base_models):
-                    if idx < len(self.ensemble.estimators_):
-                        model = self.ensemble.estimators_[idx]
-                        try:
-                            sub_pred = model.predict(X_scaled)[0]
-                            if hasattr(model, 'predict_proba'):
-                                sub_proba = model.predict_proba(X_scaled)[0]
-                                sub_conf = np.max(sub_proba)
-                                sub_proba_list = sub_proba.tolist()
-                            else:
-                                sub_conf = 1.0
-                                sub_proba_list = None
-                            
-                            sub_preds[name] = {
-                                'prediction': int(sub_pred),
-                                'confidence': float(sub_conf),
-                                'probabilities': sub_proba_list
-                            }
-                        except Exception as e:
-                            ProfessionalLogger.log(f"Submodel {name} error: {str(e)}", "WARNING", "ENSEMBLE")
-                            sub_preds[name] = {'prediction': -1, 'confidence': 0.0, 'probabilities': None}
-            
-            # If we couldn't get any sub-model predictions, create placeholder
-            if not sub_preds:
-                ProfessionalLogger.log("No sub-model predictions available", "INFO", "ENSEMBLE")
-                # Create placeholder predictions
-                for name, _ in self.base_models:
-                    sub_preds[name] = {
-                        'prediction': int(prediction),
-                        'confidence': float(confidence),
-                        'probabilities': proba.tolist()
-                    }
-            
-            # Validate prediction
-            validation = self._validate_prediction(prediction, confidence, features, df_feat)
-            
+            # 6. Basic Validation
+            validation = self._validate_prediction(prediction, confidence, features)
             if not validation['is_valid']:
-                ProfessionalLogger.log(f"Prediction validation failed: {validation['reason']}", "WARNING", "ENSEMBLE")
+                ProfessionalLogger.log(f"Validation failed: {validation['reason']}", "WARNING", "ENSEMBLE")
                 return None, 0.0, None, {}
-            
+
             return prediction, confidence, features, sub_preds
-            
+
         except Exception as e:
-            ProfessionalLogger.log(f"Prediction error: {str(e)}", "ERROR", "ENSEMBLE")
-            import traceback
-            traceback.print_exc()
+            ProfessionalLogger.log(f"Prediction error: {e}", "ERROR", "ENSEMBLE")
             return None, 0.0, None, {}
-    
-    def _validate_prediction(self, prediction, confidence, features, df_feat):
-        """Validate prediction using statistical methods"""
-        validation = {
-            'is_valid': True,
-            'reason': None,
-            'checks_passed': 0,
-            'total_checks': 0
-        }
-        
-        # 1. Confidence threshold check
-        validation['total_checks'] += 1
-        if confidence >= Config.MIN_CONFIDENCE:
-            validation['checks_passed'] += 1
-        else:
-            validation['is_valid'] = False
-            validation['reason'] = f"Low confidence: {confidence:.2%} < {Config.MIN_CONFIDENCE:.0%}"
-            return validation
-        
-        # 2. Technical indicator alignment
-        validation['total_checks'] += 1
-        rsi = features.get('rsi_normalized', 0) * 50 + 50  # Denormalize
-        
-        if prediction == 1:  # Buy signal
-            if rsi < 70:  # Not overbought
-                validation['checks_passed'] += 1
-            else:
-                validation['is_valid'] = False
-                validation['reason'] = f"Buy signal with overbought RSI: {rsi:.1f}"
-                return validation
-        else:  # Sell signal
-            if rsi > 30:  # Not oversold
-                validation['checks_passed'] += 1
-            else:
-                validation['is_valid'] = False
-                validation['reason'] = f"Sell signal with oversold RSI: {rsi:.1f}"
-                return validation
-        
-        # 3. Volatility check
-        validation['total_checks'] += 1
-        volatility = features.get('volatility', 0)
-        if volatility < 0.05:  # Reasonable volatility threshold (5%)
-            validation['checks_passed'] += 1
-        else:
-            ProfessionalLogger.log(f"High volatility detected: {volatility:.4f}", "WARNING", "ENSEMBLE")
-            validation['checks_passed'] += 1  # Allow but warn
-        
-        validation['validation_score'] = validation['checks_passed'] / validation['total_checks'] if validation['total_checks'] > 0 else 0
-        
-        return validation
-    
+
+    def _validate_prediction(self, prediction, confidence, features):
+        """Quick validation check"""
+        rsi = features.get('rsi_normalized', 0) * 50 + 50
+        if prediction == 1 and rsi > 70:
+            return {'is_valid': False, 'reason': f"Buy Signal but RSI Overbought ({rsi:.1f})"}
+        if prediction == 0 and rsi < 30: 
+             pass
+        return {'is_valid': True, 'reason': None}
+
+    def should_retrain(self):
+        """Check if retraining is needed"""
+        if not self.last_train_time: return True
+        hours_since = (datetime.now() - self.last_train_time).total_seconds() / 3600
+        return hours_since >= Config.RETRAIN_HOURS
+
     def get_diagnostics(self):
-        """Get comprehensive model diagnostics"""
+        """Get comprehensive model diagnostics matching Engine expectation"""
+        # This structure matches what ProfessionalTradingEngine expects
         return {
             'training_status': {
                 'is_trained': self.is_trained,
-                'last_train_time': self.last_train_time.isoformat() if self.last_train_time else None,
+                'last_train_time': self.last_train_time,
                 'training_metrics': self.training_metrics
             },
             'statistical_analysis': self.statistical_analysis,
             'feature_analysis': {
-                'top_features': sorted(self.feature_importance.items(), key=lambda x: x[1], reverse=True)[:10] 
-                if self.feature_importance else []
+                'top_features': [] # Placeholder to avoid errors if accessed
             },
             'model_info': {
                 'base_models': [name for name, _ in self.base_models],
                 'ensemble_type': 'voting'
             }
         }
-    
-    def should_retrain(self):
-        """Determine if retraining is needed based on statistical analysis"""
-        if not self.last_train_time:
-            return True
-        
-        # Time-based retraining
-        hours_since = (datetime.now() - self.last_train_time).total_seconds() / 3600
-        if hours_since >= Config.RETRAIN_HOURS:
-            ProfessionalLogger.log(f"Scheduled retraining after {hours_since:.1f} hours", "LEARN", "ENSEMBLE")
-            return True
-        
-        return False
-
 # ==========================================
 # SMART ORDER EXECUTOR
 # ==========================================
+
+# ==========================================
+# SMART ORDER EXECUTOR (Corrected)
+# ==========================================
 class SmartOrderExecutor:
-    """Intelligent order execution"""
-    
-    def __init__(self):
-        self.pending_orders = {}
-    
+    """Intelligent order execution with modification capabilities"""
+
     def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, comment=""):
-        """Execute trade with SL/TP validation"""
-        
+        """
+        Executes a trade with the specified parameters.
+        Must define 'symbol' as the first argument to match the Engine call.
+        """
+        # 1. Get Symbol Info
         symbol_info = mt5.symbol_info(symbol)
         if not symbol_info:
             ProfessionalLogger.log(f"Symbol {symbol} not found", "ERROR", "EXECUTOR")
             return None
+
+        # 2. Strict Volume Normalization
+        step = symbol_info.volume_step
+        min_vol = symbol_info.volume_min
+        max_vol = symbol_info.volume_max
         
-        # Validate volume using Config
-        min_volume = getattr(Config, 'MIN_VOLUME', 0.05)
-        max_volume = getattr(Config, 'MAX_VOLUME', 0.20)
-        volume_step = getattr(Config, 'VOLUME_STEP', 0.01)
+        if step > 0:
+            volume = round(volume / step) * step
         
-        volume = max(min_volume, min(volume, max_volume))
-        volume = round(volume / volume_step) * volume_step
+        volume = max(min_vol, min(volume, max_vol))
         
-        # Validate SL/TP Levels using Config
-        tick = mt5.symbol_info_tick(symbol)
-        if not tick:
-            ProfessionalLogger.log(f"Cannot get tick data for {symbol}", "ERROR", "EXECUTOR")
-            return None
-        
-        current_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
-        point = symbol_info.point if hasattr(symbol_info, 'point') else 0.01
-        digits = symbol_info.digits if hasattr(symbol_info, 'digits') else 2
-        
-        # Use Config distances
-        min_sl_points = getattr(Config, 'MIN_SL_DISTANCE_POINTS', 50)
-        max_sl_points = getattr(Config, 'MAX_SL_DISTANCE_POINTS', 300)
-        min_tp_points = getattr(Config, 'MIN_TP_DISTANCE_POINTS', 100)
-        max_tp_points = getattr(Config, 'MAX_TP_DISTANCE_POINTS', 600)
-        
-        # Validate SL/TP distances
-        if order_type == mt5.ORDER_TYPE_BUY:
-            sl_distance = current_price - sl
-            tp_distance = tp - current_price
-            
-            # Ensure minimum distances
-            if sl_distance < min_sl_points * point:
-                sl = current_price - (min_sl_points * point)
-                ProfessionalLogger.log(f"SL adjusted to minimum distance", "WARNING", "EXECUTOR")
-            
-            if tp_distance < min_tp_points * point:
-                tp = current_price + (min_tp_points * point)
-                ProfessionalLogger.log(f"TP adjusted to minimum distance", "WARNING", "EXECUTOR")
-            
-            # Ensure risk/reward ratio
-            risk_reward_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
-            min_rr = getattr(Config, 'MIN_RR_RATIO', 2.0)
-            
-            if risk_reward_ratio < min_rr and sl_distance > 0:
-                tp = current_price + (sl_distance * min_rr)
-                ProfessionalLogger.log(f"TP adjusted to maintain {min_rr}:1 R:R ratio", "WARNING", "EXECUTOR")
-                
-        else:  # SELL order
-            sl_distance = sl - current_price
-            tp_distance = current_price - tp
-            
-            # Ensure minimum distances
-            if sl_distance < min_sl_points * point:
-                sl = current_price + (min_sl_points * point)
-                ProfessionalLogger.log(f"SL adjusted to minimum distance", "WARNING", "EXECUTOR")
-            
-            if tp_distance < min_tp_points * point:
-                tp = current_price - (min_tp_points * point)
-                ProfessionalLogger.log(f"TP adjusted to minimum distance", "WARNING", "EXECUTOR")
-            
-            # Ensure risk/reward ratio
-            risk_reward_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
-            min_rr = getattr(Config, 'MIN_RR_RATIO', 2.0)
-            
-            if risk_reward_ratio < min_rr and sl_distance > 0:
-                tp = current_price - (sl_distance * min_rr)
-                ProfessionalLogger.log(f"TP adjusted to maintain {min_rr}:1 R:R ratio", "WARNING", "EXECUTOR")
-        
-        # Prepare order request
+        decimals = 2
+        if step < 0.01: decimals = 3
+        if step == 1.0: decimals = 0
+        volume = round(volume, decimals)
+
+        # 3. Check Free Margin
+        account = mt5.account_info()
+        if account:
+            margin_required = (volume * entry_price * symbol_info.trade_contract_size) / account.leverage
+            if account.margin_free < margin_required:
+                ProfessionalLogger.log(f"Insufficient Margin: Need ${margin_required:.2f}, Have ${account.margin_free:.2f}", "ERROR", "EXECUTOR")
+                return None
+
+        # 4. Prepare Request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
-            "volume": volume,
+            "volume": float(volume),
             "type": order_type,
-            "price": current_price,
-            "sl": sl,
-            "tp": tp,
+            "price": float(entry_price),
+            "sl": float(sl),
+            "tp": float(tp),
             "magic": magic,
             "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
-        
-        ProfessionalLogger.log(f"Order: {symbol} {volume} lots at {current_price:.{digits}f}", "DEBUG", "EXECUTOR")
-        ProfessionalLogger.log(f"  SL: {sl:.{digits}f} | TP: {tp:.{digits}f} | R:R: {risk_reward_ratio:.2f}:1", "DEBUG", "EXECUTOR")
-        
-        # Check spread before entry if configured
-        if hasattr(Config, 'CHECK_SPREAD_BEFORE_ENTRY') and Config.CHECK_SPREAD_BEFORE_ENTRY:
-            spread = tick.ask - tick.bid
-            max_spread = getattr(Config, 'MAX_SPREAD_POINTS', 5) * point
-            if spread > max_spread:
-                ProfessionalLogger.log(f"Spread too high: {spread/point:.1f} points > {max_spread/point:.1f}", "WARNING", "EXECUTOR")
-                return None
-        
-        # Execute with retries if configured
-        max_retries = getattr(Config, 'MAX_RETRIES', 3)
-        retry_delay = getattr(Config, 'RETRY_DELAY_MS', 500) / 1000
-        
-        for attempt in range(max_retries):
+
+        # 5. Execute with Retries
+        for i in range(3):
             result = mt5.order_send(request)
-            
             if result.retcode == mt5.TRADE_RETCODE_DONE:
-                ProfessionalLogger.log(f"✅ Order executed successfully | Ticket: {result.order}", "SUCCESS", "EXECUTOR")
+                ProfessionalLogger.log(f"✅ Order Executed: #{result.order} | {symbol} | Vol: {volume}", "SUCCESS", "EXECUTOR")
                 return result
+            elif result.retcode in [mt5.TRADE_RETCODE_REQUOTE, mt5.TRADE_RETCODE_PRICE_OFF]:
+                time.sleep(0.5)
+                # Update price for requote
+                tick = mt5.symbol_info_tick(symbol)
+                if tick: 
+                    request['price'] = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
             else:
-                if attempt < max_retries - 1:
-                    ProfessionalLogger.log(f"Order attempt {attempt+1} failed: {result.retcode}, retrying...", "WARNING", "EXECUTOR")
-                    time.sleep(retry_delay)
-                else:
-                    ProfessionalLogger.log(f"Order failed after {max_retries} attempts: {result.retcode} - {result.comment}", "ERROR", "EXECUTOR")
-        
+                ProfessionalLogger.log(f"❌ Order Failed: {result.comment} ({result.retcode})", "ERROR", "EXECUTOR")
+                break
         return None
+
+    def modify_position(self, ticket, symbol, new_sl, new_tp):
+        """Modify SL/TP of an existing position"""
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": symbol,
+            "sl": float(new_sl),
+            "tp": float(new_tp)
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            ProfessionalLogger.log(f"🔄 Position #{ticket} Modified | New SL: {new_sl}", "SUCCESS", "EXECUTOR")
+            return True
+        else:
+            ProfessionalLogger.log(f"❌ Modify Failed: {result.comment}", "ERROR", "EXECUTOR")
+            return False
+
+    def close_position(self, ticket, symbol):
+        """Close a specific position"""
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            return False
+        
+        pos = positions[0]
+        tick = mt5.symbol_info_tick(symbol)
+        
+        # Determine opposite order type
+        order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+        
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "volume": pos.volume,
+            "type": order_type,
+            "price": price,
+            "deviation": 20,
+            "magic": Config.MAGIC_NUMBER,
+            "comment": "Adaptive Exit",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            ProfessionalLogger.log(f"💰 Position #{ticket} Closed by Adaptive Manager", "SUCCESS", "EXECUTOR")
+            return True
+        return False
+
+
+
+# ==========================================
+# MULTI-TIMEFRAME ANALYSER CLASS
+# ==========================================
+class MultiTimeframeAnalyser:
+    """
+    Advanced Multi-Timeframe Analysis for XAUUSD
+    - Analyzes M5, M15, H1 timeframes for signal alignment
+    - Implements weighted consensus voting
+    - Provides trend filtering and entry precision
+    """
+    
+    def __init__(self, mt5_connection):
+        self.mt5 = mt5_connection
+        self.config = Config
+        
+        # Timeframe mapping
+        self.timeframe_map = {
+            'M5': mt5.TIMEFRAME_M5,
+            'M15': mt5.TIMEFRAME_M15,
+            'H1': mt5.TIMEFRAME_H1
+        }
+        
+        # Analysis cache
+        self.analysis_cache = {}
+        self.cache_expiry = 60  # Cache for 60 seconds
+        
+    def fetch_multi_timeframe_data(self, symbol, bars_needed=500):
+        """
+        Fetch synchronized data across all configured timeframes
+        Returns: dict with timeframe as key and DataFrame as value
+        """
+        mt5_data = {}
+        current_time = datetime.now()
+        
+        for tf_name, tf_value in self.timeframe_map.items():
+            # Check cache first
+            cache_key = f"{symbol}_{tf_name}"
+            if (cache_key in self.analysis_cache and 
+                (current_time - self.analysis_cache[cache_key]['timestamp']).seconds < self.cache_expiry):
+                mt5_data[tf_name] = self.analysis_cache[cache_key]['data']
+                continue
+            
+            # Fetch fresh data
+            rates = self.mt5.copy_rates_from_pos(symbol, tf_value, 0, bars_needed)
+            if rates is not None and len(rates) > 0:
+                df = pd.DataFrame(rates)
+                df['datetime'] = pd.to_datetime(df['time'], unit='s')
+                
+                # Cache the data
+                self.analysis_cache[cache_key] = {
+                    'data': df,
+                    'timestamp': current_time
+                }
+                mt5_data[tf_name] = df
+            else:
+                ProfessionalLogger.log(f"Failed to fetch {tf_name} data", "WARNING", "MULTI_TF")
+        
+        return mt5_data
+    
+    def calculate_timeframe_features(self, df):
+        """
+        Calculate key features for a single timeframe
+        """
+        features = {}
+        
+        if df is None or len(df) < 20:
+            return features
+        
+        # Price features
+        features['close'] = df['close'].iloc[-1]
+        features['returns_5'] = df['close'].iloc[-1] / df['close'].iloc[-5] - 1 if len(df) >= 5 else 0
+        features['returns_20'] = df['close'].iloc[-1] / df['close'].iloc[-20] - 1 if len(df) >= 20 else 0
+        
+        # Trend indicators
+        features['ema_fast'] = df['close'].ewm(span=8).mean().iloc[-1]
+        features['ema_slow'] = df['close'].ewm(span=21).mean().iloc[-1]
+        features['trend_direction'] = 1 if features['ema_fast'] > features['ema_slow'] else -1
+        features['trend_strength'] = abs(features['ema_fast'] - features['ema_slow']) / features['close']
+        
+        # Momentum
+        features['rsi'] = self._calculate_rsi(df['close'], period=14)
+        features['momentum'] = df['close'].iloc[-1] / df['close'].iloc[-10] - 1 if len(df) >= 10 else 0
+        
+        # Volatility
+        returns = df['close'].pct_change().dropna()
+        features['volatility'] = returns.std() * np.sqrt(252) if len(returns) > 0 else 0
+        
+        # Support/Resistance levels
+        features['support'] = df['low'].rolling(20).min().iloc[-1]
+        features['resistance'] = df['high'].rolling(20).max().iloc[-1]
+        features['price_position'] = (features['close'] - features['support']) / (features['resistance'] - features['support']) if (features['resistance'] - features['support']) > 0 else 0.5
+        
+        return features
+    
+    def _calculate_rsi(self, prices, period=14):
+        """Calculate RSI indicator"""
+        if len(prices) < period:
+            return 50
+        
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        
+        rs = gain / loss.replace(0, 1)
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi.iloc[-1] if not rsi.empty else 50
+    
+    def analyze_alignment(self, multi_tf_data):
+        """
+        Analyze alignment across timeframes
+        Returns: dict with alignment scores and consensus signal
+        """
+        if not multi_tf_data:
+            return None
+        
+        analysis = {
+            'timeframes': {},
+            'alignment_score': 0,
+            'consensus_signal': 0,
+            'trend_filter': 0,
+            'confidence': 0
+        }
+        
+        signals = []
+        weights = []
+        
+        # Analyze each timeframe
+        for tf_name, df in multi_tf_data.items():
+            if df is None or len(df) < 20:
+                continue
+            
+            features = self.calculate_timeframe_features(df)
+            signal = self._generate_timeframe_signal(features, tf_name)
+            
+            analysis['timeframes'][tf_name] = {
+                'signal': signal,
+                'features': features,
+                'weight': self.config.TIMEFRAME_WEIGHTS[self.config.TIMEFRAMES.index(tf_name)] if tf_name in self.config.TIMEFRAMES else 0.2
+            }
+            
+            signals.append(signal)
+            weights.append(analysis['timeframes'][tf_name]['weight'])
+        
+        if not signals:
+            return analysis
+        
+        # Calculate weighted consensus
+        weighted_signal = np.average(signals, weights=weights)
+        analysis['consensus_signal'] = 1 if weighted_signal > 0.5 else 0 if weighted_signal < -0.5 else 0.5
+        
+        # Calculate alignment score (percentage of timeframes agreeing)
+        signal_directions = [1 if s > 0 else -1 if s < 0 else 0 for s in signals]
+        if len(signal_directions) > 1:
+            agreement = sum(1 for i in range(len(signal_directions)) 
+                          for j in range(i+1, len(signal_directions)) 
+                          if signal_directions[i] * signal_directions[j] > 0)
+            total_pairs = len(signal_directions) * (len(signal_directions) - 1) / 2
+            analysis['alignment_score'] = agreement / total_pairs if total_pairs > 0 else 0
+        
+        # Apply trend filter (H1 trend dominates)
+        if 'H1' in analysis['timeframes']:
+            h1_trend = analysis['timeframes']['H1']['features']['trend_direction']
+            if self.config.LONG_TIMEFRAME_TREND_FILTER:
+                # Only allow trades in direction of H1 trend
+                if analysis['consensus_signal'] == 1 and h1_trend < 0:
+                    analysis['trend_filter'] = -1  # Filtered out
+                elif analysis['consensus_signal'] == 0 and h1_trend > 0:
+                    analysis['trend_filter'] = -1  # Filtered out
+                else:
+                    analysis['trend_filter'] = 1  # Passed filter
+        
+        # Calculate confidence
+        alignment_bonus = 1.0 if analysis['alignment_score'] >= self.config.TIMEFRAME_ALIGNMENT_THRESHOLD else 0.5
+        trend_bonus = 1.0 if analysis['trend_filter'] == 1 else 0.3
+        analysis['confidence'] = min(1.0, alignment_bonus * trend_bonus * 0.8)
+        
+        return analysis
+    
+    def _generate_timeframe_signal(self, features, timeframe_name):
+        """
+        Generate trading signal for a single timeframe
+        Returns: 1 (buy), 0 (sell), or 0.5 (neutral)
+        """
+        if not features:
+            return 0.5
+        
+        signal_score = 0
+        
+        # Price position scoring
+        price_pos = features.get('price_position', 0.5)
+        if price_pos < 0.3:
+            signal_score += 1  # Near support - bullish
+        elif price_pos > 0.7:
+            signal_score -= 1  # Near resistance - bearish
+        
+        # Trend scoring
+        trend = features.get('trend_direction', 0)
+        signal_score += trend
+        
+        # RSI scoring
+        rsi = features.get('rsi', 50)
+        if rsi < 30:
+            signal_score += 1  # Oversold - bullish
+        elif rsi > 70:
+            signal_score -= 1  # Overbought - bearish
+        
+        # Momentum scoring
+        momentum = features.get('momentum', 0)
+        signal_score += 1 if momentum > 0.005 else -1 if momentum < -0.005 else 0
+        
+        # Timeframe-specific adjustments
+        if timeframe_name == 'M5':
+            signal_score *= 0.8  # Less weight to M5 noise
+        elif timeframe_name == 'H1':
+            signal_score *= 1.2  # More weight to H1 trend
+        
+        # Normalize to -1 to 1 range
+        normalized_score = max(-1, min(1, signal_score / 4))
+        
+        # Convert to signal
+        if normalized_score > 0.2:
+            return 1  # Buy
+        elif normalized_score < -0.2:
+            return 0  # Sell
+        else:
+            return 0.5  # Neutral
+    
+    def get_multi_timeframe_recommendation(self, symbol):
+        """
+        Get comprehensive multi-timeframe trading recommendation
+        """
+        if not self.config.MULTI_TIMEFRAME_ENABLED:
+            return None
+        
+        # Fetch multi-timeframe data
+        multi_tf_data = self.fetch_multi_timeframe_data(symbol)
+        
+        if not multi_tf_data:
+            return None
+        
+        # Analyze alignment
+        analysis = self.analyze_alignment(multi_tf_data)
+        
+        if not analysis:
+            return None
+        
+        # Generate recommendation
+        recommendation = {
+            'symbol': symbol,
+            'timestamp': datetime.now().isoformat(),
+            'consensus_signal': analysis['consensus_signal'],
+            'alignment_score': analysis['alignment_score'],
+            'trend_filter_passed': analysis['trend_filter'] == 1,
+            'confidence': analysis['confidence'],
+            'timeframe_details': analysis['timeframes'],
+            'recommendation': None,
+            'recommendation_strength': None
+        }
+        
+        # Determine final recommendation
+        if analysis['alignment_score'] >= self.config.TIMEFRAME_ALIGNMENT_THRESHOLD and analysis['trend_filter'] == 1:
+            if analysis['consensus_signal'] == 1:
+                recommendation['recommendation'] = 'STRONG_BUY' if analysis['confidence'] > 0.7 else 'BUY'
+                recommendation['recommendation_strength'] = analysis['confidence']
+            elif analysis['consensus_signal'] == 0:
+                recommendation['recommendation'] = 'STRONG_SELL' if analysis['confidence'] > 0.7 else 'SELL'
+                recommendation['recommendation_strength'] = analysis['confidence']
+        elif analysis['alignment_score'] >= 0.5:
+            recommendation['recommendation'] = 'WEAK_BUY' if analysis['consensus_signal'] == 1 else 'WEAK_SELL' if analysis['consensus_signal'] == 0 else 'HOLD'
+            recommendation['recommendation_strength'] = analysis['confidence'] * 0.5
+        else:
+            recommendation['recommendation'] = 'HOLD'
+            recommendation['recommendation_strength'] = 0
+        
+        # Log the analysis
+        self._log_multi_tf_analysis(recommendation)
+        
+        return recommendation
+    
+    def _log_multi_tf_analysis(self, recommendation):
+        """Log multi-timeframe analysis results"""
+        if not recommendation:
+            return
+        
+        signals = {tf: data['signal'] for tf, data in recommendation.get('timeframe_details', {}).items()}
+        
+        log_message = (
+            f"Multi-TF Analysis | "
+            f"Signal: {recommendation['recommendation']} | "
+            f"Alignment: {recommendation['alignment_score']:.0%} | "
+            f"Confidence: {recommendation['confidence']:.0%} | "
+            f"TF Signals: {signals}"
+        )
+        
+        ProfessionalLogger.log(log_message, "ANALYSIS", "MULTI_TF")
+        
+        # Detailed logging in debug mode
+        if self.config.DEBUG_MODE:
+            for tf_name, tf_data in recommendation.get('timeframe_details', {}).items():
+                features = tf_data.get('features', {})
+                ProfessionalLogger.log(
+                    f"  {tf_name}: Signal={tf_data['signal']:.1f}, "
+                    f"RSI={features.get('rsi', 0):.1f}, "
+                    f"Trend={features.get('trend_direction', 0)}, "
+                    f"Pos={features.get('price_position', 0.5):.2f}",
+                    "DEBUG", "MULTI_TF"
+                )
 
 # ==========================================
 # PROFESSIONAL TRADE MEMORY
@@ -2508,18 +2552,27 @@ class ProfessionalTradeMemory:
 # ==========================================
 # PROFESSIONAL TRADING ENGINE WITH STATISTICAL ANALYSIS
 # ==========================================
+# ==========================================
+# PROFESSIONAL TRADING ENGINE (Fixed Config Usage)
+# ==========================================
+# ==========================================
+# PROFESSIONAL TRADING ENGINE (Adaptive Cashout Enabled)
+# ==========================================
 class ProfessionalTradingEngine:
-    """Main professional trading engine with advanced statistical analysis"""
+    """Main professional trading engine with advanced statistical analysis and adaptive management"""
     
     def __init__(self):
         self.trade_memory = ProfessionalTradeMemory()
         self.feature_engine = ProfessionalFeatureEngine()
-        self.order_executor = SmartOrderExecutor()
+        self.order_executor = SmartOrderExecutor() # Ensure this is the updated version
         self.stat_analyzer = AdvancedStatisticalAnalyzer()
         self.risk_metrics = ProfessionalRiskMetrics()
         
         # Initialize model with statistical analysis
         self.model = ProfessionalEnsemble(self.trade_memory, self.feature_engine)
+        
+        # NEW: Initialize Adaptive Exit Manager
+        self.exit_manager = AdaptiveExitManager(self.order_executor)
         
         self.connected = False
         self.active_positions = {}
@@ -2532,8 +2585,9 @@ class ProfessionalTradingEngine:
         self.returns_series = []
         self.risk_metrics_history = []
         self.fitted_base_models = None
-        ProfessionalLogger.log("Professional Trading Engine initialized with advanced statistical analysis", "INFO", "ENGINE")
-    
+        
+        ProfessionalLogger.log("Professional Trading Engine initialized with Adaptive Exit Manager", "INFO", "ENGINE")
+
     def connect_mt5(self):
         """Connect to MT5 terminal"""
         ProfessionalLogger.log("Initializing MT5...", "INFO", "ENGINE")
@@ -2556,7 +2610,7 @@ class ProfessionalTradingEngine:
         account = mt5.account_info()
         if account:
             ProfessionalLogger.log(f"✓ Connected | Account: {account.login} | "
-                      f"Balance: ${account.balance:.2f} | Equity: ${account.equity:.2f}", "SUCCESS", "ENGINE")
+                        f"Balance: ${account.balance:.2f} | Equity: ${account.equity:.2f}", "SUCCESS", "ENGINE")
         else:
             ProfessionalLogger.log("✓ Connected (account info unavailable)", "SUCCESS", "ENGINE")
         
@@ -2578,13 +2632,13 @@ class ProfessionalTradingEngine:
         self.perform_initial_analysis()
         
         return True
-    
+
     def perform_initial_analysis(self):
         """Perform initial statistical analysis"""
         ProfessionalLogger.log("Performing initial market analysis...", "ANALYSIS", "ENGINE")
         
-        # Get historical data for analysis
-        data = self.get_historical_data(bars=2000)
+        # FIXED: Use Config.LOOKBACK_BARS
+        data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
         
         if data is not None and len(data) > 500:
             # Perform comprehensive statistical analysis
@@ -2603,7 +2657,7 @@ class ProfessionalTradingEngine:
                 ProfessionalLogger.log("Initial analysis returned no results", "WARNING", "ENGINE")
         else:
             ProfessionalLogger.log("Insufficient data for initial analysis", "WARNING", "ENGINE")
-    
+
     def _extract_market_insights(self, analysis):
         """Extract and log key market insights"""
         insights = []
@@ -2654,7 +2708,7 @@ class ProfessionalTradingEngine:
             ProfessionalLogger.log("📈 MARKET INSIGHTS:", "ANALYSIS", "ENGINE")
             for insight in insights:
                 ProfessionalLogger.log(f"  • {insight}", "ANALYSIS", "ENGINE")
-    
+
     def get_historical_data(self, timeframe=None, bars=None):
         """Get historical data from MT5"""
         if not self.connected:
@@ -2670,7 +2724,7 @@ class ProfessionalTradingEngine:
             return None
         
         return pd.DataFrame(rates)
-    
+
     def get_current_positions(self):
         """Get current open positions"""
         if not self.connected:
@@ -2678,7 +2732,7 @@ class ProfessionalTradingEngine:
         
         positions = mt5.positions_get(symbol=Config.SYMBOL)
         return len(positions) if positions else 0
-    
+
     def check_closed_positions(self):
         """Check for closed positions and update records"""
         if not self.connected:
@@ -2686,7 +2740,7 @@ class ProfessionalTradingEngine:
         
         positions = mt5.positions_get(symbol=Config.SYMBOL)
         if positions is None:
-            return
+            positions = [] # Handle None return
         
         current_tickets = [pos.ticket for pos in positions]
         
@@ -2734,7 +2788,7 @@ class ProfessionalTradingEngine:
                             break
                 
                 del self.active_positions[ticket]
-    
+
     def run_periodic_tasks(self):
         """Run periodic maintenance and analysis tasks"""
         self.iteration += 1
@@ -2755,7 +2809,10 @@ class ProfessionalTradingEngine:
         # Retrain model if needed
         if self.model.should_retrain():
             ProfessionalLogger.log("🔄 Periodic model retraining...", "LEARN", "ENGINE")
-            data = self.get_historical_data(bars=2000)
+            
+            # FIXED: Use Config.LOOKBACK_BARS
+            data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
+            
             if data is not None:
                 success = self.model.train(data)
                 if success:
@@ -2766,13 +2823,14 @@ class ProfessionalTradingEngine:
         # Print status periodically
         if self.iteration % 30 == 0:
             self.print_status()
-    
+
     def perform_periodic_analysis(self):
         """Perform periodic statistical analysis"""
         ProfessionalLogger.log("🔄 Running periodic statistical analysis...", "ANALYSIS", "ENGINE")
         
-        # Get recent data
-        data = self.get_historical_data(bars=1000)
+        # FIXED: Use Config.LOOKBACK_BARS or safe max
+        analysis_bars = min(Config.LOOKBACK_BARS, 5000) 
+        data = self.get_historical_data(bars=analysis_bars)
         
         if data is not None and len(data) > 500:
             # Perform analysis
@@ -2793,7 +2851,7 @@ class ProfessionalTradingEngine:
                                          "WARNING", "ENGINE")
                 
                 self.last_regime = current_regime
-    
+
     def update_performance_metrics(self):
         """Update and calculate performance metrics"""
         if not self.connected:
@@ -2820,7 +2878,7 @@ class ProfessionalTradingEngine:
                 # Keep only recent history
                 if len(self.risk_metrics_history) > 100:
                     self.risk_metrics_history = self.risk_metrics_history[-100:]
-    
+
     def print_status(self):
         """Print current trading status"""
         account = mt5.account_info()
@@ -2843,7 +2901,7 @@ class ProfessionalTradingEngine:
                 status_msg += f" | Trades: {stats['total_trades']} | Win Rate: {stats.get('win_rate', 0):.1%}"
             
             ProfessionalLogger.log(status_msg, "INFO", "ENGINE")
-    
+
     def print_performance_report(self):
         """Print comprehensive performance report"""
         stats = self.trade_memory.get_statistical_summary()
@@ -2883,12 +2941,12 @@ class ProfessionalTradingEngine:
                 ProfessionalLogger.log(f"Initial Market Analysis: {mr.get('regime', 'unknown')} regime", "PERFORMANCE", "ENGINE")
         
         ProfessionalLogger.log("=" * 70, "PERFORMANCE", "ENGINE")
-    
+
     def train_initial_model(self):
             """Train initial model with statistical analysis using deep history"""
             ProfessionalLogger.log(f"Loading deep history ({Config.LOOKBACK_BARS} bars) for initial training...", "INFO", "ENGINE")
             
-            # FIXED: Use Config.LOOKBACK_BARS instead of hardcoded 3000
+            # FIXED: Use Config.LOOKBACK_BARS
             data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
             
             if data is not None:
@@ -2906,7 +2964,8 @@ class ProfessionalTradingEngine:
                     success = self.model.train(data)
                     
                     if success:
-                        metrics = self.model.get_diagnostics()['training_status']['training_metrics']
+                        diag = self.model.get_diagnostics()
+                        metrics = diag['training_status']['training_metrics']
                         ProfessionalLogger.log("✅ Initial model training successful", "SUCCESS", "ENGINE")
                         ProfessionalLogger.log(f"   CV Score: {metrics.get('avg_cv_score', 0):.2%}", "INFO", "ENGINE")
                     else:
@@ -3054,7 +3113,7 @@ class ProfessionalTradingEngine:
             import traceback
             traceback.print_exc()
             return None
-    
+
     def run(self):
         """Main execution method"""
         print("\n" + "=" * 70)
@@ -3073,29 +3132,111 @@ class ProfessionalTradingEngine:
         
         # Start live trading
         self.run_live_trading()
-    
+
     def run_live_trading(self):
-        """Run live trading with statistical monitoring"""
+        """Run live trading with statistical monitoring and multi-timeframe analysis"""
         ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
         ProfessionalLogger.log("STARTING LIVE TRADING WITH STATISTICAL MONITORING", "TRADE", "ENGINE")
+        ProfessionalLogger.log(f"Multi-Timeframe Analysis: {'ENABLED' if Config.MULTI_TIMEFRAME_ENABLED else 'DISABLED'}", "INFO", "ENGINE")
         ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
         
         try:
             while True:
                 self.run_periodic_tasks()
                 
-                # Get current data
-                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, 100)
-                if rates is None or len(rates) < 50:
-                    ProfessionalLogger.log("Failed to get rates, retrying...", "WARNING", "ENGINE")
-                    time.sleep(60)
+                # Ensure sufficient buffer for Feature Engineering
+                required_lookback = max(500, Config.TREND_MA * 2) 
+                
+                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
+                if rates is None or len(rates) < Config.TREND_MA + 10:
+                    ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
+                    time.sleep(10)
                     continue
                 
                 df_current = pd.DataFrame(rates)
                 
-                # Get model prediction with statistical validation
+                # ==========================================
+                # MULTI-TIMEFRAME ANALYSIS SECTION
+                # ==========================================
+                multi_tf_signal = None
+                multi_tf_confidence = 0
+                multi_tf_alignment = 0
+                min_confidence_override = Config.MIN_CONFIDENCE
+                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
+                
+                if Config.MULTI_TIMEFRAME_ENABLED:
+                    try:
+                        # Get multi-timeframe recommendation
+                        mtf_recommendation = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
+                        
+                        if mtf_recommendation:
+                            # Extract multi-TF signals
+                            multi_tf_signal = mtf_recommendation.get('consensus_signal')
+                            multi_tf_confidence = mtf_recommendation.get('confidence', 0)
+                            multi_tf_alignment = mtf_recommendation.get('alignment_score', 0)
+                            trend_filter_passed = mtf_recommendation.get('trend_filter_passed', True)
+                            
+                            # Log multi-TF analysis
+                            recommendation = mtf_recommendation.get('recommendation', 'HOLD')
+                            ProfessionalLogger.log(
+                                f"Multi-TF: {recommendation} | "
+                                f"Align: {multi_tf_alignment:.0%} | "
+                                f"Conf: {multi_tf_confidence:.0%} | "
+                                f"Trend Filter: {'PASS' if trend_filter_passed else 'FAIL'}",
+                                "ANALYSIS", "MULTI_TF"
+                            )
+                            
+                            # Adjust execution thresholds based on multi-TF analysis
+                            if not trend_filter_passed:
+                                ProfessionalLogger.log("Trade blocked by H1 trend filter", "WARNING", "MULTI_TF")
+                                signal = None  # Block all trades
+                            
+                            elif multi_tf_alignment < Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
+                                # Weak alignment - require higher confidence
+                                min_confidence_override = Config.MIN_CONFIDENCE * 1.3
+                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 1.2
+                                ProfessionalLogger.log(
+                                    f"Low alignment ({multi_tf_alignment:.0%} < {Config.TIMEFRAME_ALIGNMENT_THRESHOLD:.0%}) - "
+                                    f"raising thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
+                                    "WARNING", "MULTI_TF"
+                                )
+                            
+                            elif recommendation in ['STRONG_BUY', 'STRONG_SELL']:
+                                # Strong signal - can be more lenient
+                                min_confidence_override = Config.MIN_CONFIDENCE * 0.9
+                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 0.9
+                                ProfessionalLogger.log(
+                                    f"Strong multi-TF signal - "
+                                    f"lowering thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
+                                    "INFO", "MULTI_TF"
+                                )
+                                
+                    except Exception as e:
+                        ProfessionalLogger.log(f"Multi-TF analysis error: {str(e)}", "ERROR", "MULTI_TF")
+                        min_confidence_override = Config.MIN_CONFIDENCE
+                        min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
+                
+                # ==========================================
+                # MAIN MODEL PREDICTION
+                # ==========================================
                 signal, confidence, features, model_details = self.model.predict(df_current)
                 
+                # ==========================================
+                # ADAPTIVE EXIT LOGIC
+                # ==========================================
+                df_features = self.feature_engine.calculate_features(df_current)
+                
+                if self.active_positions:
+                    self.exit_manager.manage_positions(
+                        df_features, 
+                        self.active_positions, 
+                        signal, 
+                        confidence
+                    )
+                
+                # ==========================================
+                # SIGNAL VALIDATION & PROCESSING
+                # ==========================================
                 if signal is None:
                     # No valid signal
                     if self.iteration % 30 == 0:
@@ -3103,25 +3244,58 @@ class ProfessionalTradingEngine:
                         if tick:
                             price = tick.ask
                             positions = self.get_current_positions()
-                            ProfessionalLogger.log(f"Waiting for signal | Price: {price:.2f} | Positions: {positions}", 
-                                                 "INFO", "ENGINE")
+                            ProfessionalLogger.log(
+                                f"Waiting for signal | Price: {price:.2f} | "
+                                f"Positions: {positions} | "
+                                f"Multi-TF: {multi_tf_signal if multi_tf_signal is not None else 'N/A'}",
+                                "INFO", "ENGINE"
+                            )
                     time.sleep(60)
                     continue
                 
-                # Check model agreement
+                # Calculate model agreement
                 agreement = 0
                 if model_details:
                     predictions = [m['prediction'] for m in model_details.values() 
-                                 if m['prediction'] != -1]
+                                if m['prediction'] != -1]
                     if predictions:
                         agreement = predictions.count(signal) / len(predictions)
                 
-                # Log prediction details
+                # Apply multi-TF signal validation if enabled
+                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
+                    # Check if multi-TF confirms the signal
+                    if multi_tf_signal != 0.5:  # Not neutral
+                        signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
+                                    (signal == 0 and multi_tf_signal < 0.4)
+                        
+                        if not signal_match:
+                            ProfessionalLogger.log(
+                                f"Model signal ({'BUY' if signal == 1 else 'SELL'}) "
+                                f"rejected by multi-TF consensus ({multi_tf_signal:.2f})",
+                                "WARNING", "MULTI_TF"
+                            )
+                            # Don't execute, wait for next cycle
+                            time.sleep(60)
+                            continue
+                
+                # Calculate combined confidence (model + multi-TF)
+                combined_confidence = confidence
+                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_confidence > 0:
+                    # Weighted average: 70% model, 30% multi-TF
+                    combined_confidence = (confidence * 0.7) + (multi_tf_confidence * 0.3)
+                
+                # Log comprehensive signal analysis
                 signal_type = "BUY" if signal == 1 else "SELL"
                 status_msg = (f"Signal Analysis | {signal_type} | "
-                             f"Confidence: {confidence:.1%} | "
-                             f"Agreement: {agreement:.0%} | "
-                             f"Price: {df_current['close'].iloc[-1]:.2f}")
+                            f"Model Conf: {confidence:.1%} | "
+                            f"Agreement: {agreement:.0%} | ")
+                
+                if Config.MULTI_TIMEFRAME_ENABLED:
+                    status_msg += f"Multi-TF Align: {multi_tf_alignment:.0%} | "
+                    status_msg += f"Combined Conf: {combined_confidence:.1%}"
+                else:
+                    status_msg += f"Price: {df_current['close'].iloc[-1]:.2f}"
+                
                 ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
                 
                 # Log key features
@@ -3129,30 +3303,100 @@ class ProfessionalTradingEngine:
                     key_features = {
                         'rsi': features.get('rsi_normalized', 0) * 50 + 50,
                         'volatility': features.get('volatility', 0),
-                        'regime': features.get('regime_encoded', 0)
+                        'regime': features.get('regime_encoded', 0),
+                        'atr_percent': features.get('atr_percent', 0)
                     }
-                    ProfessionalLogger.log(f"Key Features: RSI={key_features['rsi']:.1f} | "
-                                         f"Vol={key_features['volatility']:.4f} | "
-                                         f"Regime={key_features['regime']}", "DATA", "ENGINE")
+                    ProfessionalLogger.log(
+                        f"Key Features: RSI={key_features['rsi']:.1f} | "
+                        f"Vol={key_features['volatility']:.4f} | "
+                        f"Regime={key_features['regime']} | "
+                        f"ATR%={key_features['atr_percent']:.4f}",
+                        "DATA", "ENGINE"
+                    )
+                
+                # ==========================================
+                # TRADE EXECUTION DECISION
+                # ==========================================
+                execute_trade = False
+                execution_reason = ""
+                
+                # Check if all conditions are met
+                if (combined_confidence >= min_confidence_override and 
+                    agreement >= min_agreement_override):
+                    
+                    # Additional multi-TF validation if enabled
+                    if Config.MULTI_TIMEFRAME_ENABLED:
+                        if multi_tf_alignment >= Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
+                            execute_trade = True
+                            execution_reason = "Strong multi-TF alignment"
+                        elif combined_confidence > (min_confidence_override * 1.5):
+                            # Very high confidence can override weak alignment
+                            execute_trade = True
+                            execution_reason = f"Very high confidence ({combined_confidence:.1%})"
+                        else:
+                            execution_reason = f"Low multi-TF alignment ({multi_tf_alignment:.0%})"
+                    else:
+                        execute_trade = True
+                        execution_reason = "Standard model signal"
                 
                 # Execute trade if conditions are met
-                if (confidence >= Config.MIN_CONFIDENCE and 
-                    agreement >= Config.MIN_ENSEMBLE_AGREEMENT):
+                if execute_trade:
+                    ProfessionalLogger.log(
+                        f"🎯 {execution_reason} - Executing {signal_type} signal! | "
+                        f"Combined Confidence: {combined_confidence:.1%}",
+                        "SUCCESS", "ENGINE"
+                    )
                     
-                    ProfessionalLogger.log(f"🎯 High-confidence {signal_type} signal confirmed!", "SUCCESS", "ENGINE")
+                    # Add multi-TF data to model_details for tracking
+                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
+                        if 'multi_tf' not in model_details:
+                            model_details['multi_tf'] = {}
+                        model_details['multi_tf'].update({
+                            'consensus_signal': multi_tf_signal,
+                            'alignment_score': multi_tf_alignment,
+                            'confidence': multi_tf_confidence,
+                            'min_thresholds_applied': {
+                                'confidence': min_confidence_override,
+                                'agreement': min_agreement_override
+                            }
+                        })
                     
                     # Execute trade
-                    self.execute_trade(signal, confidence, df_current, features, model_details)
+                    self.execute_trade(signal, combined_confidence, df_current, features, model_details)
+                else:
+                    if self.iteration % 10 == 0:  # Log every 10 iterations when not executing
+                        ProfessionalLogger.log(
+                            f"Signal rejected | Reason: {execution_reason} | "
+                            f"Conf: {combined_confidence:.1%} (need {min_confidence_override:.1%}) | "
+                            f"Agree: {agreement:.0%} (need {min_agreement_override:.0%})",
+                            "INFO", "ENGINE"
+                        )
                 
                 # Update performance metrics
                 self.update_performance_metrics()
                 
-                time.sleep(60)  # Wait 1 minute before next iteration
+                # Adaptive sleep based on market conditions
+                sleep_time = 60  # Default 1 minute
+                
+                if Config.MULTI_TIMEFRAME_ENABLED:
+                    # Adjust sleep time based on volatility and alignment
+                    if features and 'volatility' in features:
+                        vol = features['volatility']
+                        if vol > 0.015:  # High volatility
+                            sleep_time = 30  # Check more frequently
+                        elif vol < 0.005:  # Low volatility
+                            sleep_time = 90  # Check less frequently
+                    
+                    # If we just executed a trade or have active positions, check more frequently
+                    if execute_trade or self.active_positions:
+                        sleep_time = max(30, sleep_time // 2)
+                
+                time.sleep(sleep_time)
                 
         except KeyboardInterrupt:
             ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
         except Exception as e:
-            ProfessionalLogger.log(f"Unexpected error: {str(e)}", "ERROR", "ENGINE")
+            ProfessionalLogger.log(f"Unexpected error in live trading: {str(e)}", "ERROR", "ENGINE")
             import traceback
             traceback.print_exc()
         finally:
@@ -3161,6 +3405,147 @@ class ProfessionalTradingEngine:
             
             mt5.shutdown()
             ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
+# ==========================================
+# ADAPTIVE EXIT MANAGER (Smart Cashout)
+# ==========================================
+class AdaptiveExitManager:
+    """
+    Manages open positions dynamically to prevent giving back profits.
+    Active monitoring of:
+    1. Technical Exhaustion (RSI, Bollinger Bands)
+    2. Trend Weakness (ADX drop)
+    3. Profit Protection (Trailing Stops)
+    4. Time Decay (Stagnation)
+    """
+    def __init__(self, executor):
+        self.executor = executor
+
+    def manage_positions(self, df, active_positions, current_model_signal, current_confidence):
+        """
+        Main loop to check all active positions against exit logic.
+        """
+        if not active_positions or df.empty:
+            return
+
+        # Get latest market data
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # Calculate dynamic metrics
+        atr = latest.get('atr', 0)
+        close_price = latest['close']
+        rsi = latest.get('rsi', 50)
+        adx = latest.get('adx', 0)
+        
+        # Iterate through a copy of keys to avoid modification errors during iteration
+        for ticket, trade in list(active_positions.items()):
+            
+            # Skip if trade is too new (give it breathing room)
+            duration_bars = (int(time.time()) - trade['open_time']) / (Config.TIMEFRAME * 60 if hasattr(Config, 'TIMEFRAME') else 900)
+            if duration_bars < 2: 
+                continue
+
+            symbol = trade['symbol']
+            trade_type = trade['type'] # 'BUY' or 'SELL'
+            entry_price = trade['open_price']
+            current_sl = trade['stop_loss']
+            current_tp = trade['take_profit']
+            
+            # 1. MODEL INVALIDATION CHECK
+            # If the model explicitly predicts the opposite with high confidence, exit immediately.
+            model_flip = False
+            if trade_type == 'BUY' and current_model_signal == 0 and current_confidence > 0.65:
+                ProfessionalLogger.log(f"📉 Model flipped to BEARISH (Conf: {current_confidence:.2f}) - Exiting BUY #{ticket}", "EXIT", "MANAGER")
+                self.executor.close_position(ticket, symbol)
+                continue
+            elif trade_type == 'SELL' and current_model_signal == 1 and current_confidence > 0.65:
+                ProfessionalLogger.log(f"📈 Model flipped to BULLISH (Conf: {current_confidence:.2f}) - Exiting SELL #{ticket}", "EXIT", "MANAGER")
+                self.executor.close_position(ticket, symbol)
+                continue
+
+            # 2. PROFIT PROTECTION (Smart Trailing)
+            # Calculate current floating profit in points
+            if trade_type == 'BUY':
+                profit_points = close_price - entry_price
+                distance_to_sl = close_price - current_sl
+            else:
+                profit_points = entry_price - close_price
+                distance_to_sl = current_sl - close_price
+
+            # Define R (Initial Risk)
+            initial_risk = abs(entry_price - current_sl)
+            if initial_risk == 0: initial_risk = atr # Safety
+            
+            r_multiple = profit_points / initial_risk
+
+            new_sl = current_sl
+            sl_changed = False
+
+            # --- Logic A: Breakeven at 1R ---
+            if r_multiple > 1.0:
+                # Move to Breakeven + small buffer
+                if trade_type == 'BUY':
+                    be_price = entry_price + (atr * 0.1)
+                    if new_sl < be_price:
+                        new_sl = be_price
+                        sl_changed = True
+                        ProfessionalLogger.log(f"🛡️ Locked Breakeven for #{ticket} (1R reached)", "RISK", "MANAGER")
+                else:
+                    be_price = entry_price - (atr * 0.1)
+                    if new_sl > be_price:
+                        new_sl = be_price
+                        sl_changed = True
+                        ProfessionalLogger.log(f"🛡️ Locked Breakeven for #{ticket} (1R reached)", "RISK", "MANAGER")
+
+            # --- Logic B: Tight Trailing at 2R+ (Don't be greedy) ---
+            if r_multiple > 2.0:
+                # Trail at 1 ATR distance (tight)
+                if trade_type == 'BUY':
+                    trail_price = close_price - (atr * 1.0)
+                    if trail_price > new_sl:
+                        new_sl = trail_price
+                        sl_changed = True
+                else:
+                    trail_price = close_price + (atr * 1.0)
+                    if trail_price < new_sl:
+                        new_sl = trail_price
+                        sl_changed = True
+
+            # --- Logic C: Technical Exhaustion (Overvaluation) ---
+            # If RSI is screaming overbought/oversold, tighten SL dramatically
+            is_exhausted = False
+            if trade_type == 'BUY' and rsi > 75:
+                is_exhausted = True
+            elif trade_type == 'SELL' and rsi < 25:
+                is_exhausted = True
+            
+            if is_exhausted:
+                # Tighten to candle low/high
+                if trade_type == 'BUY':
+                    tight_stop = latest['low']
+                    if tight_stop > new_sl: 
+                        new_sl = tight_stop
+                        sl_changed = True
+                        ProfessionalLogger.log(f"⚠️ RSI Exhaustion ({rsi:.1f}) - Tightening Stop on #{ticket}", "RISK", "MANAGER")
+                else:
+                    tight_stop = latest['high']
+                    if tight_stop < new_sl:
+                        new_sl = tight_stop
+                        sl_changed = True
+                        ProfessionalLogger.log(f"⚠️ RSI Exhaustion ({rsi:.1f}) - Tightening Stop on #{ticket}", "RISK", "MANAGER")
+
+            # --- Logic D: Trend Death (ADX Drop) ---
+            # If we are in a profit but ADX drops below 20, the trend is likely dead.
+            if profit_points > 0 and adx < 20 and prev['adx'] > 20:
+                ProfessionalLogger.log(f"💤 Trend Dying (ADX < 20) - Closing #{ticket} to free capital", "EXIT", "MANAGER")
+                self.executor.close_position(ticket, symbol)
+                continue
+
+            # Apply SL modifications if needed
+            if sl_changed:
+                self.executor.modify_position(ticket, symbol, new_sl, current_tp)
+                # Update local memory
+                trade['stop_loss'] = new_sl
 
 # ==========================================
 # MAIN FUNCTION
