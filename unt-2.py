@@ -99,8 +99,8 @@ class Config:
     # ==========================================
     
     # Data Collection
-    LOOKBACK_BARS = 6000  # 8000 bars for stable statistics 
-    TRAINING_MIN_SAMPLES = 6000  # Minimum samples for reliable training
+    LOOKBACK_BARS = 8000  # 8000 bars for stable statistics 
+    TRAINING_MIN_SAMPLES = 5000  # Minimum samples for reliable training
     VALIDATION_SPLIT = 0.20  # 20% validation set
     
     # Retraining Schedule
@@ -2564,7 +2564,7 @@ class ProfessionalTradingEngine:
     def __init__(self):
         self.trade_memory = ProfessionalTradeMemory()
         self.feature_engine = ProfessionalFeatureEngine()
-        self.order_executor = SmartOrderExecutor() # Ensure this is the updated version
+        self.order_executor = SmartOrderExecutor()
         self.stat_analyzer = AdvancedStatisticalAnalyzer()
         self.risk_metrics = ProfessionalRiskMetrics()
         
@@ -2573,6 +2573,9 @@ class ProfessionalTradingEngine:
         
         # NEW: Initialize Adaptive Exit Manager
         self.exit_manager = AdaptiveExitManager(self.order_executor)
+        
+        # NEW: Initialize Multi-Timeframe Analyser
+        self.multi_tf_analyser = MultiTimeframeAnalyser(mt5)  # Add this line
         
         self.connected = False
         self.active_positions = {}
@@ -2586,8 +2589,7 @@ class ProfessionalTradingEngine:
         self.risk_metrics_history = []
         self.fitted_base_models = None
         
-        ProfessionalLogger.log("Professional Trading Engine initialized with Adaptive Exit Manager", "INFO", "ENGINE")
-
+        ProfessionalLogger.log("Professional Trading Engine initialized with Adaptive Exit Manager and Multi-Timeframe Analysis", "INFO", "ENGINE")  # Updated log message
     def connect_mt5(self):
         """Connect to MT5 terminal"""
         ProfessionalLogger.log("Initializing MT5...", "INFO", "ENGINE")
