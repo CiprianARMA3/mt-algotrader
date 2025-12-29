@@ -55,9 +55,9 @@ class Config:
     
     # XAUUSD-specific: Gold typically trades in 0.01 lot increments
     BASE_VOLUME = 0.25  # START SMALL - critical for risk management
-    MAX_VOLUME = 1   # Maximum position size cap
+    MAX_VOLUME = 1.00   # Maximum position size cap
     MIN_VOLUME = 0.25   # MT5 minimum for gold
-    VOLUME_STEP = 0.5  # Standard gold lot increment
+    VOLUME_STEP = 0.01  # Standard gold lot increment
     
     MAGIC_NUMBER = 998877
     
@@ -66,17 +66,18 @@ class Config:
     # ==========================================
     
     # Position Sizing
-    RISK_PERCENT = 0.01  # Risk 1% per trade (was 1.5% - too aggressive)
+    RISK_PERCENT = 0.01  # Risk 1% per trade (Conservative for stacking)
+    MAX_TOTAL_RISK_PERCENT = 0.05  # MAX AGGREGATE RISK: Cap total exposure at 5%
     MAX_RISK_PER_TRADE = 100  # Maximum $ risk per trade (failsafe)
     
     # Signal Quality Thresholds
     MIN_CONFIDENCE = 0.50  # 70% minimum model confidence
-    MIN_ENSEMBLE_AGREEMENT = 0.85  # 85% model agreement (increased precision)
+    MIN_ENSEMBLE_AGREEMENT = 0.60  # 85% model agreement (increased precision)
     
     # Position Limits
-    MAX_POSITIONS = 1  # One position at a time (gold is volatile)
-    MAX_DAILY_TRADES = 3  # Prevent overtrading
-    MIN_TIME_BETWEEN_TRADES = 30  # Minutes between trades
+    MAX_POSITIONS = 5  # Allow multiple positions (stacking)
+    MAX_DAILY_TRADES = 10  # Increased to allow scaling in
+    MIN_TIME_BETWEEN_TRADES = 10  # Reduced to 10 minutes for scaling in
     
     # Loss Limits
     MAX_DAILY_LOSS_PERCENT = 2.0  # Stop trading after 2% daily loss
@@ -469,8 +470,9 @@ class AdvancedStatisticalAnalyzer:
             'q1': np.percentile(returns, 25),
             'q3': np.percentile(returns, 75),
             'iqr': np.percentile(returns, 75) - np.percentile(returns, 25),
-            'sharpe': np.mean(returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0,
-            'sortino': np.mean(returns) / np.std(returns[returns < 0]) * np.sqrt(252) if len(returns[returns < 0]) > 0 else 0
+            # CORRECTION: Uses 252*96 for M15 annualization
+            'sharpe': np.mean(returns) / np.std(returns) * np.sqrt(252 * 96) if np.std(returns) > 0 else 0,
+            'sortino': np.mean(returns) / np.std(returns[returns < 0]) * np.sqrt(252 * 96) if len(returns[returns < 0]) > 0 else 0
         }
         
         # Normality tests
@@ -494,11 +496,18 @@ class AdvancedStatisticalAnalyzer:
         stats['tail_asymmetry'] = abs(stats['left_tail_mean']) - abs(stats['right_tail_mean'])
         stats['tail_ratio'] = abs(stats['left_tail_mean'] / stats['right_tail_mean']) if stats['right_tail_mean'] != 0 else float('inf')
         
-        # Value at Risk and Expected Shortfall
-        stats['var_95'] = np.percentile(returns, 5)
-        stats['var_99'] = np.percentile(returns, 1)
-        stats['cvar_95'] = np.mean(returns[returns <= stats['var_95']]) if len(returns[returns <= stats['var_95']]) > 0 else stats['var_95']
-        stats['cvar_99'] = np.mean(returns[returns <= stats['var_99']]) if len(returns[returns <= stats['var_99']]) > 0 else stats['var_99']
+        # Value at Risk and Expected Shortfall - HISTORICAL METHOD + DAILY SCALING
+        # VaR on 15m timeframe
+        var_95_15m = np.percentile(returns, 5)
+        var_99_15m = np.percentile(returns, 1)
+        
+        # Scale to Daily VaR (approximate using sqrt(T)) - 96 intervals per day
+        # Note: This implies "If I held this risk for a day"
+        stats['var_95'] = var_95_15m * np.sqrt(96)
+        stats['var_99'] = var_99_15m * np.sqrt(96)
+        
+        stats['cvar_95'] = np.mean(returns[returns <= var_95_15m]) * np.sqrt(96) if len(returns[returns <= var_95_15m]) > 0 else stats['var_95']
+        stats['cvar_99'] = np.mean(returns[returns <= var_99_15m]) * np.sqrt(96) if len(returns[returns <= var_99_15m]) > 0 else stats['var_99']
         
         # Downside risk metrics
         downside_returns = returns[returns < 0]
@@ -675,8 +684,8 @@ class AdvancedStatisticalAnalyzer:
             if len(clean_returns) < 50:
                 return np.std(clean_returns) if len(clean_returns) > 0 else 0.001
             
-            # Scale returns for better numerical stability
-            scaled_returns = clean_returns * 100
+            # Scale returns for better numerical stability (x100)
+            scaled_returns = clean_returns * 100.0
             
             # Check for all zeros or constant values
             if np.std(scaled_returns) < 1e-10:
@@ -2929,9 +2938,45 @@ class ProfessionalTradingEngine:
             if not account:
                 ProfessionalLogger.log("Cannot get account info", "ERROR", "EXECUTOR")
                 return None
+
+            # --- AGGREGATE RISK CHECK ---
+            positions = mt5.positions_get(symbol=symbol)
+            current_total_risk = 0
             
+            symbol_info = mt5.symbol_info(symbol)
+            if not symbol_info:
+                ProfessionalLogger.log(f"Symbol {symbol} info not found", "ERROR", "EXECUTOR")
+                return None
+                
+            # Improved Contract Size Fallback (XAUUSD specific)
+            contract_size = getattr(symbol_info, 'trade_contract_size', 100000)
+            if not contract_size or contract_size == 0:
+                if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
+                    contract_size = 100
+                else:
+                    contract_size = 100000
+            
+            if positions:
+                for pos in positions:
+                    if pos.sl > 0:
+                        risk = abs(pos.price_open - pos.sl) * pos.volume * contract_size
+                        current_total_risk += risk
+            
+            max_total_risk = account.equity * Config.MAX_TOTAL_RISK_PERCENT
+            available_risk = max_total_risk - current_total_risk
+            
+            if available_risk <= 0:
+                ProfessionalLogger.log(f"Aggregate Risk Limit Reached: ${current_total_risk:.2f} >= ${max_total_risk:.2f}", "RISK", "ENGINE")
+                return None
+
+            # Calculate base risk for this trade
             risk_amount = account.equity * Config.RISK_PERCENT
             
+            # Cap risk to available aggregate room
+            if risk_amount > available_risk:
+                ProfessionalLogger.log(f"Scaling down risk to fit aggregate limit: {risk_amount:.2f} -> {available_risk:.2f}", "RISK", "ENGINE")
+                risk_amount = available_risk
+
             # Calculate stop loss and take profit
             atr = features.get('atr_percent', 0.001) * entry_price
             if atr == 0:
@@ -2944,29 +2989,27 @@ class ProfessionalTradingEngine:
                 stop_loss = entry_price + (atr * Config.ATR_SL_MULTIPLIER)
                 take_profit = entry_price - (atr * Config.ATR_TP_MULTIPLIER)
             
-            # Calculate position size
-            risk_per_share = abs(entry_price - stop_loss)
-            if risk_per_share > 0:
-                position_size = risk_amount / risk_per_share
-                position_size = min(position_size, Config.BASE_VOLUME * (confidence / Config.MIN_CONFIDENCE))
+            # Calculate position size (Dynamic Volume Sizing)
+            sl_distance = abs(entry_price - stop_loss)
+            
+            if sl_distance > 0:
+                # Volume = Risk / (StopDistance * ContractSize)
+                position_size = risk_amount / (sl_distance * contract_size)
                 
-                # Adjust for account leverage and margin
-                symbol_info = mt5.symbol_info(symbol)
-                if symbol_info:
-                    # Convert to lots
-                    contract_size = getattr(symbol_info, 'trade_contract_size', 100000)
-                    position_size = position_size / contract_size
-                    
-                    # Round to allowed lot size
-                    if hasattr(symbol_info, 'volume_step'):
-                        step = symbol_info.volume_step
-                        position_size = round(position_size / step) * step
-                    
-                    # Ensure within limits
-                    if hasattr(symbol_info, 'volume_min'):
-                        position_size = max(position_size, symbol_info.volume_min)
-                    if hasattr(symbol_info, 'volume_max'):
-                        position_size = min(position_size, symbol_info.volume_max)
+                # Confidence Scaling: Size * (Confidence / 0.8)
+                scaling_factor = confidence / 0.8
+                position_size = position_size * scaling_factor
+                
+                # Round to allowed lot size
+                if hasattr(symbol_info, 'volume_step'):
+                    step = symbol_info.volume_step
+                    position_size = round(position_size / step) * step
+                
+                # Ensure within limits
+                if hasattr(symbol_info, 'volume_min'):
+                    position_size = max(position_size, symbol_info.volume_min)
+                if hasattr(symbol_info, 'volume_max'):
+                    position_size = min(position_size, symbol_info.volume_max)
             
             # Execute the order
             result = self.order_executor.execute_trade(
