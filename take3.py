@@ -376,7 +376,7 @@ class Config:
     VALIDATE_RISK = True
     VALIDATE_STOPS = True
 
-        MULTI_TIMEFRAME_PARAMS = {
+    MULTI_TIMEFRAME_PARAMS = {
         # Alignment bonus scaling
         'ALIGNMENT_BONUS_ABOVE_START': 0.8,
         'ALIGNMENT_BONUS_ABOVE_RANGE': 0.2,
@@ -3024,8 +3024,307 @@ class ProfessionalDataQualityChecker:
 # ==========================================
 # SMART ORDER EXECUTOR
 # ==========================================
+# ==========================================
+# SMART ORDER EXECUTOR
+# ==========================================
 class SmartOrderExecutor:
     """Intelligent order execution with modification capabilities"""
+
+    def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, comment=""):
+        """
+        Enhanced trade execution with comprehensive validation and volume management.
+        """
+        # 1. Get Symbol Info with validation
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            ProfessionalLogger.log(f"Symbol {symbol} not found", "ERROR", "EXECUTOR")
+            return None
+        
+        if not symbol_info.visible:
+            if not mt5.symbol_select(symbol, True):
+                ProfessionalLogger.log(f"Failed to select symbol {symbol}", "ERROR", "EXECUTOR")
+                return None
+        
+        if not symbol_info.trade_allowed:
+            ProfessionalLogger.log(f"Trading disabled for {symbol}", "ERROR", "EXECUTOR")
+            return None
+        
+        # 2. Comprehensive Volume Normalization with Config enforcement
+        step = symbol_info.volume_step
+        broker_min_vol = symbol_info.volume_min
+        broker_max_vol = symbol_info.volume_max
+        
+        # Apply Config volume limits (more restrictive of Config vs Broker)
+        min_vol = max(Config.MIN_VOLUME, broker_min_vol)
+        max_vol = min(Config.MAX_VOLUME, broker_max_vol)
+        
+        # Initial step normalization
+        if step > 0:
+            volume = round(volume / step) * step
+        
+        # Enforce volume boundaries with precision handling
+        original_volume = volume
+        volume = max(min_vol, min(volume, max_vol))
+        
+        # Determine decimal precision
+        decimals = 2
+        if step < 0.001:
+            decimals = 4
+        elif step < 0.01:
+            decimals = 3
+        elif step >= 1.0:
+            decimals = 0
+        
+        volume = round(volume, decimals)
+        
+        # Log volume adjustments
+        if abs(original_volume - volume) > 0.001:
+            ProfessionalLogger.log(
+                f"Volume adjusted: {original_volume:.3f} → {volume:.3f} "
+                f"(min: {min_vol:.3f}, max: {max_vol:.3f})",
+                "WARNING", "EXECUTOR"
+            )
+        
+        # 3. Advanced Margin Check with Safety Buffer
+        account = mt5.account_info()
+        if account:
+            # Calculate margin with contract size consideration
+            contract_size = symbol_info.trade_contract_size
+            margin_required = (volume * entry_price * contract_size) / account.leverage
+            
+            # Add safety buffer (15%)
+            margin_with_buffer = margin_required * 1.15
+            
+            # Check against free margin
+            if account.margin_free < margin_with_buffer:
+                margin_shortage = margin_with_buffer - account.margin_free
+                margin_ratio = account.margin_free / margin_with_buffer
+                
+                ProfessionalLogger.log(
+                    f"Insufficient Margin: Need ${margin_with_buffer:.2f} "
+                    f"(incl 15% buffer), Have ${account.margin_free:.2f} | "
+                    f"Shortage: ${margin_shortage:.2f} | "
+                    f"Margin Ratio: {margin_ratio:.1%}",
+                    "ERROR", "EXECUTOR"
+                )
+                
+                # Suggest reduced volume that fits margin
+                safe_volume = (account.margin_free * 0.85 * account.leverage) / (entry_price * contract_size)
+                
+                if step > 0:
+                    safe_volume = round(safe_volume / step) * step
+                
+                safe_volume = max(min_vol, min(safe_volume, max_vol))
+                safe_volume = round(safe_volume, decimals)
+                
+                ProfessionalLogger.log(
+                    f"Suggested safe volume: {safe_volume:.3f} (from {volume:.3f})",
+                    "INFO", "EXECUTOR"
+                )
+                return None
+            
+            margin_ratio = margin_required / account.margin_free if account.margin_free > 0 else 0
+            ProfessionalLogger.log(
+                f"Margin check passed: ${margin_required:.2f} required, "
+                f"${account.margin_free:.2f} available | "
+                f"Margin Ratio: {margin_ratio:.1%}",
+                "DEBUG", "EXECUTOR"
+            )
+        else:
+            ProfessionalLogger.log("Could not retrieve account info", "ERROR", "EXECUTOR")
+            return None
+        
+        # 4. Spread Check
+        if Config.CHECK_SPREAD_BEFORE_ENTRY:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick:
+                spread = (tick.ask - tick.bid) / symbol_info.point
+                max_allowed_spread = Config.MAX_SPREAD_POINTS
+                
+                if spread > max_allowed_spread:
+                    ProfessionalLogger.log(
+                        f"Spread too wide: {spread:.1f} pts > {max_allowed_spread:.1f} pts",
+                        "WARNING", "EXECUTOR"
+                    )
+                    return None
+                
+                ProfessionalLogger.log(f"Spread check passed: {spread:.1f} pts", "DEBUG", "EXECUTOR")
+        
+        # 5. Validate Stop Loss and Take Profit distances
+        if Config.REQUIRE_STOP_LOSS and (sl == 0 or sl is None):
+            ProfessionalLogger.log("Stop loss required but not set", "ERROR", "EXECUTOR")
+            return None
+        
+        if Config.REQUIRE_TAKE_PROFIT and (tp == 0 or tp is None):
+            ProfessionalLogger.log("Take profit required but not set", "ERROR", "EXECUTOR")
+            return None
+        
+        # Calculate SL/TP distances in points
+        sl_distance = abs(entry_price - sl) / symbol_info.point if sl > 0 else 0
+        tp_distance = abs(entry_price - tp) / symbol_info.point if tp > 0 else 0
+        
+        # Validate minimum distances
+        if sl > 0 and sl_distance < Config.MIN_SL_DISTANCE_POINTS:
+            ProfessionalLogger.log(
+                f"Stop loss too close: {sl_distance:.1f} pts < "
+                f"minimum {Config.MIN_SL_DISTANCE_POINTS} pts",
+                "ERROR", "EXECUTOR"
+            )
+            return None
+        
+        if tp > 0 and tp_distance < Config.MIN_TP_DISTANCE_POINTS:
+            ProfessionalLogger.log(
+                f"Take profit too close: {tp_distance:.1f} pts < "
+                f"minimum {Config.MIN_TP_DISTANCE_POINTS} pts",
+                "ERROR", "EXECUTOR"
+            )
+            return None
+        
+        # Validate maximum distances
+        if sl > 0 and sl_distance > Config.MAX_SL_DISTANCE_POINTS:
+            ProfessionalLogger.log(
+                f"Stop loss too far: {sl_distance:.1f} pts > "
+                f"maximum {Config.MAX_SL_DISTANCE_POINTS} pts",
+                "ERROR", "EXECUTOR"
+            )
+            return None
+        
+        if tp > 0 and tp_distance > Config.MAX_TP_DISTANCE_POINTS:
+            ProfessionalLogger.log(
+                f"Take profit too far: {tp_distance:.1f} pts > "
+                f"maximum {Config.MAX_TP_DISTANCE_POINTS} pts",
+                "ERROR", "EXECUTOR"
+            )
+            return None
+        
+        # Validate Risk/Reward ratio
+        if sl > 0 and tp > 0:
+            rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
+            if rr_ratio < Config.MIN_RR_RATIO:
+                ProfessionalLogger.log(
+                    f"Risk/Reward ratio too low: {rr_ratio:.2f} < "
+                    f"minimum {Config.MIN_RR_RATIO}",
+                    "ERROR", "EXECUTOR"
+                )
+                return None
+            
+            ProfessionalLogger.log(f"RR Ratio: {rr_ratio:.2f}", "DEBUG", "EXECUTOR")
+        
+        # 6. Prepare Request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": float(entry_price),
+            "sl": float(sl) if sl else 0.0,
+            "tp": float(tp) if tp else 0.0,
+            "deviation": Config.MAX_SLIPPAGE_POINTS,
+            "magic": magic,
+            "comment": f"{comment} | Vol:{volume:.3f}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        # 7. Execute with Retry Logic
+        result = None
+        last_error = ""
+        
+        for attempt in range(Config.MAX_RETRIES):
+            try:
+                ProfessionalLogger.log(
+                    f"Order attempt {attempt + 1}/{Config.MAX_RETRIES} | "
+                    f"{'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+                    f"{volume:.3f} {symbol} @ {entry_price:.5f} "
+                    f"(SL: {sl:.5f}, TP: {tp:.5f})",
+                    "INFO", "EXECUTOR"
+                )
+                
+                result = mt5.order_send(request)
+                
+                if result.retcode == mt5.TRADE_RETCODE_DONE:
+                    # Success!
+                    commission = abs(result.commission) if result.commission else 0
+                    swap = abs(result.swap) if result.swap else 0
+                    
+                    ProfessionalLogger.log(
+                        f"✅ Order Executed: #{result.order} | "
+                        f"{'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+                        f"{volume:.3f} {symbol} @ {entry_price:.5f} | "
+                        f"Commission: ${commission:.2f}, Swap: ${swap:.2f}",
+                        "SUCCESS", "EXECUTOR"
+                    )
+                    
+                    # Log trade metrics
+                    if sl > 0:
+                        risk_per_trade = abs(entry_price - sl) * volume * contract_size
+                        ProfessionalLogger.log(
+                            f"💰 Trade Risk: ${risk_per_trade:.2f} | "
+                            f"Risk %: {(risk_per_trade/account.equity*100):.2f}%",
+                            "RISK", "EXECUTOR"
+                        )
+                    
+                    return result
+                
+                # Handle specific error conditions
+                elif result.retcode in [mt5.TRADE_RETCODE_REQUOTE, mt5.TRADE_RETCODE_PRICE_OFF]:
+                    last_error = "Price changed (requote)"
+                    time.sleep(Config.RETRY_DELAY_MS / 1000)
+                    
+                    # Update price for retry
+                    tick = mt5.symbol_info_tick(symbol)
+                    if tick:
+                        new_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+                        request['price'] = float(new_price)
+                        
+                        # Adjust SL/TP relative to new price
+                        if sl > 0:
+                            sl_distance_price = abs(entry_price - sl)
+                            request['sl'] = float(new_price - sl_distance_price) if order_type == mt5.ORDER_TYPE_BUY else \
+                                          float(new_price + sl_distance_price)
+                        
+                        if tp > 0:
+                            tp_distance_price = abs(entry_price - tp)
+                            request['tp'] = float(new_price + tp_distance_price) if order_type == mt5.ORDER_TYPE_BUY else \
+                                          float(new_price - tp_distance_price)
+                        
+                        ProfessionalLogger.log(
+                            f"Price updated: {entry_price:.5f} → {new_price:.5f}",
+                            "DEBUG", "EXECUTOR"
+                        )
+                
+                elif result.retcode == mt5.TRADE_RETCODE_NO_MONEY:
+                    last_error = "Insufficient funds"
+                    break  # Don't retry this error
+                
+                elif result.retcode == mt5.TRADE_RETCODE_MARKET_CLOSED:
+                    last_error = "Market is closed"
+                    break  # Don't retry this error
+                
+                elif result.retcode == mt5.TRADE_RETCODE_LIMIT_ORDERS:
+                    last_error = "Too many pending orders"
+                    break  # Don't retry this error
+                
+                else:
+                    last_error = f"{result.comment} (code: {result.retcode})"
+                    time.sleep(Config.RETRY_DELAY_MS / 1000)
+            
+            except Exception as e:
+                last_error = str(e)
+                ProfessionalLogger.log(f"Exception during order send: {e}", "ERROR", "EXECUTOR")
+                time.sleep(Config.RETRY_DELAY_MS / 1000)
+        
+        # 8. Failed execution handling
+        if result:
+            ProfessionalLogger.log(
+                f"❌ Order Failed after {Config.MAX_RETRIES} attempts: "
+                f"{last_error} | Request: {request}",
+                "ERROR", "EXECUTOR"
+            )
+        else:
+            ProfessionalLogger.log(f"❌ Order Failed: {last_error}", "ERROR", "EXECUTOR")
+        
+        return None
 
     def modify_position(self, ticket, symbol, new_sl, new_tp):
         """Modify SL/TP of an existing position"""
@@ -3039,7 +3338,7 @@ class SmartOrderExecutor:
         
         result = mt5.order_send(request)
         if result.retcode == mt5.TRADE_RETCODE_DONE:
-            ProfessionalLogger.log(f"🔄 Position #{ticket} Modified | New SL: {new_sl}", "SUCCESS", "EXECUTOR")
+            ProfessionalLogger.log(f"🔄 Position #{ticket} Modified | New SL: {new_sl:.5f}, TP: {new_tp:.5f}", "SUCCESS", "EXECUTOR")
             return True
         else:
             ProfessionalLogger.log(f"❌ Modify Failed: {result.comment}", "ERROR", "EXECUTOR")
@@ -3076,7 +3375,38 @@ class SmartOrderExecutor:
             ProfessionalLogger.log(f"💰 Position #{ticket} Closed by Adaptive Manager", "SUCCESS", "EXECUTOR")
             return True
         return False
-
+    
+    def close_partial(self, ticket, symbol, volume):
+        """Close partial position"""
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            return False
+        
+        pos = positions[0]
+        tick = mt5.symbol_info_tick(symbol)
+        
+        order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+        
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "price": price,
+            "deviation": 20,
+            "magic": Config.MAGIC_NUMBER,
+            "comment": "Partial Exit",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            ProfessionalLogger.log(f"💰 Partial close: {volume:.3f} of #{ticket}", "SUCCESS", "EXECUTOR")
+            return True
+        return False
 # ==========================================
 # MULTI-TIMEFRAME ANALYSER CLASS
 # ==========================================
@@ -3904,611 +4234,530 @@ class EnhancedTradingEngine:
         else:
             ProfessionalLogger.log(f"❌ Failed to retrieve historical data from MT5", "ERROR", "ENGINE")
     
-    def execute_trade(self, symbol, order_type, volume, entry_price, sl, tp, magic, comment=""):
+    def execute_trade(self, signal, confidence, df, features, model_details):
         """
-        Enhanced trade execution with comprehensive validation and volume management.
+        Execute trade with comprehensive validation and risk management.
         """
-        # 1. Get Symbol Info with validation
-        symbol_info = mt5.symbol_info(symbol)
-        if not symbol_info:
-            ProfessionalLogger.log(f"Symbol {symbol} not found", "ERROR", "EXECUTOR")
-            return None
-        
-        if not symbol_info.trade_allowed:
-            ProfessionalLogger.log(f"Trading disabled for {symbol}", "ERROR", "EXECUTOR")
-            return None
-        
-        # 2. Comprehensive Volume Normalization with Config enforcement
-        step = symbol_info.volume_step
-        broker_min_vol = symbol_info.volume_min
-        broker_max_vol = symbol_info.volume_max
-        
-        # Apply Config volume limits (more restrictive of Config vs Broker)
-        min_vol = max(Config.MIN_VOLUME, broker_min_vol)
-        max_vol = min(Config.MAX_VOLUME, broker_max_vol)
-        
-        ProfessionalLogger.log(f"Volume limits: Config [{Config.MIN_VOLUME:.2f}-{Config.MAX_VOLUME:.2f}], "
-                             f"Broker [{broker_min_vol:.2f}-{broker_max_vol:.2f}], "
-                             f"Applied [{min_vol:.2f}-{max_vol:.2f}] | Step: {step}", 
-                             "DEBUG", "EXECUTOR")
-        
-        # Initial step normalization
-        if step > 0:
-            volume = round(volume / step) * step
-        
-        # Enforce volume boundaries with precision handling
-        original_volume = volume
-        volume = max(min_vol, min(volume, max_vol))
-        
-        # Determine decimal precision
-        decimals = 2
-        if step < 0.001: decimals = 4
-        elif step < 0.01: decimals = 3
-        elif step == 1.0: decimals = 0
-        
-        volume = round(volume, decimals)
-        
-        # Log volume adjustments
-        if abs(original_volume - volume) > 0.001:
-            ProfessionalLogger.log(f"Volume adjusted: {original_volume:.3f} → {volume:.3f} "
-                                 f"(min: {min_vol:.3f}, max: {max_vol:.3f})", 
-                                 "WARNING", "EXECUTOR")
-        
-        # 3. Advanced Margin Check with Safety Buffer
-        account = mt5.account_info()
-        if account:
-            # Calculate margin with contract size consideration
-            contract_size = getattr(symbol_info, 'trade_contract_size', 100)
-            margin_required = (volume * entry_price * contract_size) / account.leverage
-            
-            # Add safety buffer (15%)
-            margin_with_buffer = margin_required * 1.15
-            
-            # Check against free margin
-            if account.margin_free < margin_with_buffer:
-                margin_shortage = margin_with_buffer - account.margin_free
-                margin_ratio = account.margin_free / margin_with_buffer
-                
-                ProfessionalLogger.log(f"Insufficient Margin: Need ${margin_with_buffer:.2f} "
-                                     f"(incl 15% buffer), Have ${account.margin_free:.2f} | "
-                                     f"Shortage: ${margin_shortage:.2f} | "
-                                     f"Margin Ratio: {margin_ratio:.1%}", 
-                                     "ERROR", "EXECUTOR")
-                
-                # Suggest reduced volume that fits margin
-                safe_volume = (account.margin_free * 0.85 * account.leverage) / (entry_price * contract_size)
-                
-                if step > 0:
-                    safe_volume = round(safe_volume / step) * step
-                
-                safe_volume = max(min_vol, min(safe_volume, max_vol))
-                safe_volume = round(safe_volume, decimals)
-                
-                ProfessionalLogger.log(f"Suggested safe volume: {safe_volume:.3f} "
-                                     f"(from {volume:.3f})", "INFO", "EXECUTOR")
-                return None
-            
-            margin_ratio = margin_required / account.margin_free if account.margin_free > 0 else 0
-            ProfessionalLogger.log(f"Margin check passed: ${margin_required:.2f} required, "
-                                 f"${account.margin_free:.2f} available | "
-                                 f"Margin Ratio: {margin_ratio:.1%}", 
-                                 "DEBUG", "EXECUTOR")
-        else:
-            ProfessionalLogger.log("Could not retrieve account info", "ERROR", "EXECUTOR")
-            return None
-        
-        # 4. Advanced Spread Check with dynamic threshold
-        if Config.CHECK_SPREAD_BEFORE_ENTRY:
-            tick = mt5.symbol_info_tick(symbol)
-            if tick:
-                spread = (tick.ask - tick.bid) * 10000  # Convert to points
-                max_allowed_spread = Config.MAX_SPREAD_POINTS
-                
-                # Dynamic spread adjustment based on ATR volatility
-                try:
-                    rates = mt5.copy_rates_from_pos(symbol, Config.TIMEFRAME, 0, 20)
-                    if rates is not None and len(rates) > 0:
-                        df = pd.DataFrame(rates)
-                        atr = self._calculate_atr(df)
-                        atr_points = atr * 10000
-                        
-                        # Increase allowed spread in high volatility
-                        if atr_points > 20:  # High volatility
-                            max_allowed_spread = max(Config.MAX_SPREAD_POINTS, atr_points * 0.5)
-                            ProfessionalLogger.log(f"High volatility detected (ATR: {atr_points:.1f} pts). "
-                                                 f"Allowing wider spread: {max_allowed_spread:.1f} pts", 
-                                                 "DEBUG", "EXECUTOR")
-                except:
-                    pass
-                
-                if spread > max_allowed_spread:
-                    ProfessionalLogger.log(f"Spread too wide: {spread:.1f} pts > "
-                                         f"allowed {max_allowed_spread:.1f} pts", 
-                                         "WARNING", "EXECUTOR")
-                    return None
-                
-                ProfessionalLogger.log(f"Spread check passed: {spread:.1f} pts", "DEBUG", "EXECUTOR")
-        
-        # 5. Validate Stop Loss and Take Profit distances
-        if Config.REQUIRE_STOP_LOSS and sl == 0:
-            ProfessionalLogger.log("Stop loss required but not set", "ERROR", "EXECUTOR")
-            return None
-        
-        if Config.REQUIRE_TAKE_PROFIT and tp == 0:
-            ProfessionalLogger.log("Take profit required but not set", "ERROR", "EXECUTOR")
-            return None
-        
-        # Calculate SL/TP distances
-        sl_distance = abs(entry_price - sl) * 10000 if sl > 0 else 0  # Convert to points
-        tp_distance = abs(entry_price - tp) * 10000 if tp > 0 else 0
-        
-        # Validate minimum distances
-        if sl > 0 and sl_distance < Config.MIN_SL_DISTANCE_POINTS:
-            ProfessionalLogger.log(f"Stop loss too close: {sl_distance:.1f} pts < "
-                                 f"minimum {Config.MIN_SL_DISTANCE_POINTS} pts", 
-                                 "ERROR", "EXECUTOR")
-            return None
-        
-        if tp > 0 and tp_distance < Config.MIN_TP_DISTANCE_POINTS:
-            ProfessionalLogger.log(f"Take profit too close: {tp_distance:.1f} pts < "
-                                 f"minimum {Config.MIN_TP_DISTANCE_POINTS} pts", 
-                                 "ERROR", "EXECUTOR")
-            return None
-        
-        # Validate maximum distances
-        if sl > 0 and sl_distance > Config.MAX_SL_DISTANCE_POINTS:
-            ProfessionalLogger.log(f"Stop loss too far: {sl_distance:.1f} pts > "
-                                 f"maximum {Config.MAX_SL_DISTANCE_POINTS} pts", 
-                                 "ERROR", "EXECUTOR")
-            return None
-        
-        if tp > 0 and tp_distance > Config.MAX_TP_DISTANCE_POINTS:
-            ProfessionalLogger.log(f"Take profit too far: {tp_distance:.1f} pts > "
-                                 f"maximum {Config.MAX_TP_DISTANCE_POINTS} pts", 
-                                 "ERROR", "EXECUTOR")
-            return None
-        
-        # Validate Risk/Reward ratio
-        if sl > 0 and tp > 0:
-            rr_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
-            if rr_ratio < Config.MIN_RR_RATIO:
-                ProfessionalLogger.log(f"Risk/Reward ratio too low: {rr_ratio:.2f} < "
-                                     f"minimum {Config.MIN_RR_RATIO}", 
-                                     "ERROR", "EXECUTOR")
-                return None
-            
-            ProfessionalLogger.log(f"RR Ratio: {rr_ratio:.2f}", "DEBUG", "EXECUTOR")
-        
-        # 6. Prepare Enhanced Request with additional parameters
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": float(volume),
-            "type": order_type,
-            "price": float(entry_price),
-            "sl": float(sl) if sl > 0 else 0.0,
-            "tp": float(tp) if tp > 0 else 0.0,
-            "deviation": Config.MAX_SLIPPAGE_POINTS,
-            "magic": magic,
-            "comment": f"{comment} | Vol:{volume:.3f}",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-        
-        # 7. Advanced Execution with Retry Logic and Price Adaptation
-        result = None
-        last_error = ""
-        
-        for attempt in range(Config.MAX_RETRIES):
-            try:
-                ProfessionalLogger.log(f"Order attempt {attempt + 1}/{Config.MAX_RETRIES} | "
-                                     f"{'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
-                                     f"{volume:.3f} {symbol} @ {entry_price:.5f} "
-                                     f"(SL: {sl:.5f}, TP: {tp:.5f})", 
-                                     "INFO", "EXECUTOR")
-                
-                result = mt5.order_send(request)
-                
-                if result.retcode == mt5.TRADE_RETCODE_DONE:
-                    # Success!
-                    commission = abs(result.commission) if result.commission else 0
-                    swap = abs(result.swap) if result.swap else 0
-                    
-                    ProfessionalLogger.log(f"✅ Order Executed: #{result.order} | "
-                                         f"{'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
-                                         f"{volume:.3f} {symbol} @ {entry_price:.5f} | "
-                                         f"Commission: ${commission:.2f}, Swap: ${swap:.2f} | "
-                                         f"Comment: {comment}", 
-                                         "SUCCESS", "EXECUTOR")
-                    
-                    # Log trade metrics
-                    if sl > 0:
-                        risk_per_trade = abs(entry_price - sl) * volume * contract_size
-                        ProfessionalLogger.log(f"💰 Trade Risk: ${risk_per_trade:.2f} | "
-                                             f"Risk %: {(risk_per_trade/account.equity*100):.2f}%", 
-                                             "RISK", "EXECUTOR")
-                    
-                    return result
-                
-                # Handle specific error conditions
-                elif result.retcode in [mt5.TRADE_RETCODE_REQUOTE, mt5.TRADE_RETCODE_PRICE_OFF]:
-                    last_error = f"Price changed (requote), retrying..."
-                    time.sleep(Config.RETRY_DELAY_MS / 1000)
-                    
-                    # Update price for retry
-                    tick = mt5.symbol_info_tick(symbol)
-                    if tick:
-                        new_price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
-                        request['price'] = float(new_price)
-                        
-                        # Also adjust SL/TP if they're relative to entry
-                        if sl > 0:
-                            sl_distance_points = abs(entry_price - sl) * 10000
-                            request['sl'] = float(new_price - (sl_distance_points / 10000)) if order_type == mt5.ORDER_TYPE_BUY else \
-                                          float(new_price + (sl_distance_points / 10000))
-                        
-                        if tp > 0:
-                            tp_distance_points = abs(entry_price - tp) * 10000
-                            request['tp'] = float(new_price + (tp_distance_points / 10000)) if order_type == mt5.ORDER_TYPE_BUY else \
-                                          float(new_price - (tp_distance_points / 10000))
-                        
-                        ProfessionalLogger.log(f"Price updated: {entry_price:.5f} → {new_price:.5f}", 
-                                             "DEBUG", "EXECUTOR")
-                
-                elif result.retcode == mt5.TRADE_RETCODE_NO_MONEY:
-                    last_error = "Insufficient funds"
-                    break  # Don't retry this error
-                
-                elif result.retcode == mt5.TRADE_RETCODE_MARKET_CLOSED:
-                    last_error = "Market is closed"
-                    break  # Don't retry this error
-                
-                elif result.retcode == mt5.TRADE_RETCODE_LIMIT_ORDERS:
-                    last_error = "Too many pending orders"
-                    break  # Don't retry this error
-                
-                else:
-                    last_error = f"{result.comment} (code: {result.retcode})"
-                    time.sleep(Config.RETRY_DELAY_MS / 1000)
-            
-            except Exception as e:
-                last_error = str(e)
-                ProfessionalLogger.log(f"Exception during order send: {e}", "ERROR", "EXECUTOR")
-                time.sleep(Config.RETRY_DELAY_MS / 1000)
-        
-        # 8. Failed execution handling
-        if result:
-            error_details = mt5.last_error() if hasattr(mt5, 'last_error') else "Unknown"
-            ProfessionalLogger.log(f"❌ Order Failed after {Config.MAX_RETRIES} attempts: "
-                                 f"{last_error} | Details: {error_details} | "
-                                 f"Request: {request}", 
-                                 "ERROR", "EXECUTOR")
-        else:
-            ProfessionalLogger.log(f"❌ Order Failed: {last_error}", "ERROR", "EXECUTOR")
-        
-        return None
-    
-    def _calculate_atr(self, df, period=14):
-        """Helper method to calculate ATR"""
-        try:
-            high = df['high'].values
-            low = df['low'].values
-            close = df['close'].values
-            
-            # Calculate True Range
-            tr = np.zeros(len(df))
-            for i in range(1, len(df)):
-                hl = high[i] - low[i]
-                hc = abs(high[i] - close[i-1])
-                lc = abs(low[i] - close[i-1])
-                tr[i] = max(hl, hc, lc)
-            
-            # Calculate ATR
-            atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
-            return atr
-            
-        except Exception as e:
-            ProfessionalLogger.log(f"ATR calculation error: {e}", "WARNING", "EXECUTOR")
-            return 0.001  # Default small value
-    def run(self):
-        """Main execution method"""
-        print("\n" + "=" * 70)
-        print("🤖 ENHANCED PROFESSIONAL MT5 ALGORITHMIC TRADING SYSTEM")
-        print("📊 Advanced Statistical Analysis | Dynamic Labeling | Regime-Aware Models")
-        print("=" * 70 + "\n")
-        
-        ProfessionalLogger.log("Starting enhanced trading system with all improvements...", "INFO", "ENGINE")
-        
-        if not self.connect_mt5():
+        # Check position limits
+        current_positions = self.get_current_positions()
+        if current_positions >= Config.MAX_POSITIONS:
+            ProfessionalLogger.log(f"Max positions reached: {current_positions}/{Config.MAX_POSITIONS}", "WARNING", "ENGINE")
             return
         
-        self.train_initial_model()
+        # Get account info
+        account = mt5.account_info()
+        if not account:
+            ProfessionalLogger.log("Could not retrieve account info", "ERROR", "ENGINE")
+            return
         
-        self.run_enhanced_live_trading()
-    
-    def run_enhanced_live_trading(self):
-        """Enhanced live trading with all new features"""
-        ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
-        ProfessionalLogger.log("STARTING ENHANCED LIVE TRADING", "TRADE", "ENGINE")
-        ProfessionalLogger.log(f"Dynamic Barriers: {'ENABLED' if Config.USE_DYNAMIC_BARRIERS else 'DISABLED'}", "INFO", "ENGINE")
-        ProfessionalLogger.log(f"Entry Confirmation: {'ENABLED' if Config.USE_CONFIRMATION_ENTRY else 'DISABLED'}", "INFO", "ENGINE")
-        ProfessionalLogger.log(f"Parameter Optimization: {'ENABLED' if Config.PARAM_OPTIMIZATION_ENABLED else 'DISABLED'}", "INFO", "ENGINE")
-        ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
+        # Get current price
+        tick = mt5.symbol_info_tick(Config.SYMBOL)
+        if not tick:
+            ProfessionalLogger.log("Could not get current tick", "ERROR", "ENGINE")
+            return
         
-        try:
-            while True:
-                self.run_periodic_tasks()
+        symbol_info = mt5.symbol_info(Config.SYMBOL)
+        if not symbol_info:
+            ProfessionalLogger.log("Could not get symbol info", "ERROR", "ENGINE")
+            return
+        
+        # Determine trade direction
+        if signal == 1:  # BUY
+            order_type = mt5.ORDER_TYPE_BUY
+            entry_price = tick.ask
+            trade_type_str = "BUY"
+        else:  # SELL
+            order_type = mt5.ORDER_TYPE_SELL
+            entry_price = tick.bid
+            trade_type_str = "SELL"
+        
+        # ==========================================
+        # CALCULATE POSITION SIZE
+        # ==========================================
+        
+        # Get ATR for dynamic sizing
+        atr = features.get('atr_percent', 0.001)
+        if atr <= 0:
+            atr = 0.001
+        
+        # Calculate base volume using risk percentage
+        risk_amount = account.equity * Config.RISK_PERCENT
+        
+        # Calculate stop loss distance
+        if Config.USE_DYNAMIC_SL_TP:
+            atr_absolute = atr * entry_price
+            sl_distance = atr_absolute * Config.ATR_SL_MULTIPLIER
+        else:
+            sl_distance = entry_price * Config.FIXED_SL_PERCENT
+        
+        # Calculate volume based on risk
+        point_value = symbol_info.trade_contract_size * symbol_info.trade_tick_size / symbol_info.trade_tick_value
+        volume_raw = risk_amount / (sl_distance * point_value)
+        
+        # Apply volatility scaling if enabled
+        if Config.VOLATILITY_SCALING_ENABLED:
+            volatility = features.get('volatility', 0)
+            if volatility > Config.HIGH_VOL_THRESHOLD:
+                volume_raw *= Config.HIGH_VOL_SIZE_MULTIPLIER
+                ProfessionalLogger.log(f"High volatility - reducing size by {Config.HIGH_VOL_SIZE_MULTIPLIER}x", "RISK", "ENGINE")
+            elif volatility < Config.LOW_VOL_THRESHOLD:
+                volume_raw *= Config.LOW_VOL_SIZE_MULTIPLIER
+                ProfessionalLogger.log(f"Low volatility - increasing size by {Config.LOW_VOL_SIZE_MULTIPLIER}x", "RISK", "ENGINE")
+        
+        # Apply confidence-based sizing
+        if Config.PERFORMANCE_BASED_POSITION_SIZING:
+            volume_raw *= confidence
+        
+        # Normalize volume to broker requirements
+        volume_step = symbol_info.volume_step
+        if volume_step > 0:
+            volume = round(volume_raw / volume_step) * volume_step
+        else:
+            volume = volume_raw
+        
+        # Apply volume limits
+        volume = max(Config.MIN_VOLUME, min(volume, Config.MAX_VOLUME))
+        volume = max(symbol_info.volume_min, min(volume, symbol_info.volume_max))
+        
+        # Round to appropriate decimals
+        if volume_step >= 1.0:
+            volume = round(volume, 0)
+        elif volume_step >= 0.1:
+            volume = round(volume, 1)
+        elif volume_step >= 0.01:
+            volume = round(volume, 2)
+        else:
+            volume = round(volume, 3)
+        
+        ProfessionalLogger.log(f"Position sizing: Raw={volume_raw:.3f}, Final={volume:.3f}, Risk=${risk_amount:.2f}", "RISK", "ENGINE")
+        
+        # ==========================================
+        # CALCULATE STOP LOSS AND TAKE PROFIT
+        # ==========================================
+        
+        if Config.USE_DYNAMIC_SL_TP:
+            atr_absolute = atr * entry_price
+            sl_distance = atr_absolute * Config.ATR_SL_MULTIPLIER
+            tp_distance = atr_absolute * Config.ATR_TP_MULTIPLIER
+        else:
+            sl_distance = entry_price * Config.FIXED_SL_PERCENT
+            tp_distance = entry_price * Config.FIXED_TP_PERCENT
+        
+        # Calculate actual SL/TP prices
+        if signal == 1:  # BUY
+            stop_loss = entry_price - sl_distance
+            take_profit = entry_price + tp_distance
+        else:  # SELL
+            stop_loss = entry_price + sl_distance
+            take_profit = entry_price - tp_distance
+        
+        # Validate SL/TP distances
+        sl_distance_points = abs(entry_price - stop_loss) * 10000
+        tp_distance_points = abs(entry_price - take_profit) * 10000
+        
+        if sl_distance_points < Config.MIN_SL_DISTANCE_POINTS:
+            sl_distance_points = Config.MIN_SL_DISTANCE_POINTS
+            if signal == 1:
+                stop_loss = entry_price - (sl_distance_points / 10000)
+            else:
+                stop_loss = entry_price + (sl_distance_points / 10000)
+        
+        if tp_distance_points < Config.MIN_TP_DISTANCE_POINTS:
+            tp_distance_points = Config.MIN_TP_DISTANCE_POINTS
+            if signal == 1:
+                take_profit = entry_price + (tp_distance_points / 10000)
+            else:
+                take_profit = entry_price - (tp_distance_points / 10000)
+        
+        # Validate Risk/Reward ratio
+        rr_ratio = tp_distance_points / sl_distance_points if sl_distance_points > 0 else 0
+        if rr_ratio < Config.MIN_RR_RATIO:
+            ProfessionalLogger.log(f"Risk/Reward too low: {rr_ratio:.2f} < {Config.MIN_RR_RATIO}", "WARNING", "ENGINE")
+            # Adjust TP to meet minimum RR
+            tp_distance_points = sl_distance_points * Config.MIN_RR_RATIO
+            if signal == 1:
+                take_profit = entry_price + (tp_distance_points / 10000)
+            else:
+                take_profit = entry_price - (tp_distance_points / 10000)
+            rr_ratio = Config.MIN_RR_RATIO
+        
+        ProfessionalLogger.log(
+            f"Trade Setup: {trade_type_str} {volume:.3f} @ {entry_price:.5f} | "
+            f"SL: {stop_loss:.5f} ({sl_distance_points:.1f} pts) | "
+            f"TP: {take_profit:.5f} ({tp_distance_points:.1f} pts) | "
+            f"RR: {rr_ratio:.2f}",
+            "INFO", "ENGINE"
+        )
+        
+        # ==========================================
+        # EXECUTE THE TRADE
+        # ==========================================
+        
+        comment = f"Conf:{confidence:.0%}"
+        if model_details:
+            agreement = sum(1 for m in model_details.values() if m.get('prediction') == signal) / len(model_details)
+            comment += f"|Agr:{agreement:.0%}"
+        
+        result = self.order_executor.execute_trade(
+            symbol=Config.SYMBOL,
+            order_type=order_type,
+            volume=volume,
+            entry_price=entry_price,
+            sl=stop_loss,
+            tp=take_profit,
+            magic=Config.MAGIC_NUMBER,
+            comment=comment
+        )
+        
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            # Record trade in memory
+            trade_data = {
+                'ticket': result.order,
+                'symbol': Config.SYMBOL,
+                'type': trade_type_str,
+                'signal': signal,
+                'volume': volume,
+                'open_price': entry_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'open_time': int(time.time()),
+                'confidence': confidence,
+                'features': features,
+                'model_details': model_details,
+                'status': 'open'
+            }
+            
+            self.active_positions[result.order] = trade_data
+            
+            ProfessionalLogger.log(
+                f"✅ Trade Opened: #{result.order} | {trade_type_str} {volume:.3f} @ {entry_price:.5f} | "
+                f"Conf: {confidence:.0%} | RR: {rr_ratio:.2f}",
+                "SUCCESS", "ENGINE"
+            )
+        else:
+            ProfessionalLogger.log("Trade execution failed", "ERROR", "ENGINE")
+            
+        def _calculate_atr(self, df, period=14):
+            """Helper method to calculate ATR"""
+            try:
+                high = df['high'].values
+                low = df['low'].values
+                close = df['close'].values
                 
-                required_lookback = max(500, Config.TREND_MA * 2) 
+                # Calculate True Range
+                tr = np.zeros(len(df))
+                for i in range(1, len(df)):
+                    hl = high[i] - low[i]
+                    hc = abs(high[i] - close[i-1])
+                    lc = abs(low[i] - close[i-1])
+                    tr[i] = max(hl, hc, lc)
                 
-                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
-                if rates is None or len(rates) < Config.TREND_MA + 10:
-                    ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
-                    time.sleep(10)
-                    continue
+                # Calculate ATR
+                atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
+                return atr
                 
-                df_current = pd.DataFrame(rates)
-                
-                # ==========================================
-                # MULTI-TIMEFRAME ANALYSIS
-                # ==========================================
-                multi_tf_signal = None
-                multi_tf_confidence = 0
-                multi_tf_alignment = 0
-                min_confidence_override = Config.MIN_CONFIDENCE
-                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
-                
-                if Config.MULTI_TIMEFRAME_ENABLED:
-                    try:
-                        mtf_recommendation = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
-                        
-                        if mtf_recommendation:
-                            multi_tf_signal = mtf_recommendation.get('consensus_signal')
-                            multi_tf_confidence = mtf_recommendation.get('confidence', 0)
-                            multi_tf_alignment = mtf_recommendation.get('alignment_score', 0)
-                            trend_filter_passed = mtf_recommendation.get('trend_filter_passed', True)
-                            
-                            recommendation = mtf_recommendation.get('recommendation', 'HOLD')
-                            ProfessionalLogger.log(
-                                f"Multi-TF: {recommendation} | "
-                                f"Align: {multi_tf_alignment:.0%} | "
-                                f"Conf: {multi_tf_confidence:.0%} | "
-                                f"Trend Filter: {'PASS' if trend_filter_passed else 'FAIL'}",
-                                "ANALYSIS", "MULTI_TF"
-                            )
-                            
-                            if not trend_filter_passed:
-                                ProfessionalLogger.log("Trade blocked by H1 trend filter", "WARNING", "MULTI_TF")
-                                signal = None
-                            
-                            elif multi_tf_alignment < Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
-                                min_confidence_override = Config.MIN_CONFIDENCE * 1.3
-                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 1.2
-                                ProfessionalLogger.log(
-                                    f"Low alignment ({multi_tf_alignment:.0%} < {Config.TIMEFRAME_ALIGNMENT_THRESHOLD:.0%}) - "
-                                    f"raising thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
-                                    "WARNING", "MULTI_TF"
-                                )
-                            
-                            elif recommendation in ['STRONG_BUY', 'STRONG_SELL']:
-                                min_confidence_override = Config.MIN_CONFIDENCE * 0.9
-                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 0.9
-                                ProfessionalLogger.log(
-                                    f"Strong multi-TF signal - "
-                                    f"lowering thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
-                                    "INFO", "MULTI_TF"
-                                )
-                                
-                    except Exception as e:
-                        ProfessionalLogger.log(f"Multi-TF analysis error: {str(e)}", "ERROR", "MULTI_TF")
-                        min_confidence_override = Config.MIN_CONFIDENCE
-                        min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
-                
-                # ==========================================
-                # MAIN MODEL PREDICTION
-                # ==========================================
-                signal, confidence, features, model_details = self.model.predict(df_current)
-                
-                # ==========================================
-                # ADAPTIVE EXIT LOGIC
-                # ==========================================
-                df_features = self.feature_engine.calculate_features(df_current)
-                
-                if self.active_positions:
-                    self.exit_manager.manage_positions(
-                        df_features, 
-                        self.active_positions, 
-                        signal, 
-                        confidence
-                    )
-                
-                # ==========================================
-                # SIGNAL VALIDATION & FILTERING
-                # ==========================================
-                if signal is None:
-                    if self.iteration % 30 == 0:
-                        tick = mt5.symbol_info_tick(Config.SYMBOL)
-                        if tick:
-                            price = tick.ask
-                            positions = self.get_current_positions()
-                            ProfessionalLogger.log(
-                                f"Waiting for signal | Price: {price:.2f} | "
-                                f"Positions: {positions} | "
-                                f"Multi-TF: {multi_tf_signal if multi_tf_signal is not None else 'N/A'}",
-                                "INFO", "ENGINE"
-                            )
-                    time.sleep(60)
-                    continue
-                
-                # Calculate model agreement
-                agreement = 0
-                if model_details:
-                    predictions = [m['prediction'] for m in model_details.values() 
-                                if m['prediction'] != -1]
-                    if predictions:
-                        agreement = predictions.count(signal) / len(predictions)
-                
-                # Multi-TF validation
-                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
-                    if multi_tf_signal != 0.5:
-                        signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
-                                    (signal == 0 and multi_tf_signal < 0.4)
-                        
-                        if not signal_match:
-                            ProfessionalLogger.log(
-                                f"Model signal ({'BUY' if signal == 1 else 'SELL'}) "
-                                f"rejected by multi-TF consensus ({multi_tf_signal:.2f})",
-                                "WARNING", "MULTI_TF"
-                            )
-                            time.sleep(60)
-                            continue
-                
-                # Combined confidence
-                combined_confidence = confidence
-                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_confidence > 0:
-                    combined_confidence = (confidence * 0.7) + (multi_tf_confidence * 0.3)
-                
-                # Signal Quality Filtering
-                market_context = {
-                    'volatility_regime': features.get('volatility_regime', 1),
-                    'spread_pips': 2,  # Default
-                    'hour': datetime.now().hour,
-                    'high_impact_news_soon': False,
-                    'existing_positions': list(self.active_positions.values()),
-                    'vol_surprise': features.get('vol_surprise', 0),
-                    'market_regime': self.last_regime,
-                    'multi_tf_alignment': multi_tf_alignment
-                }
-                
-                is_valid, filter_reason = self.signal_filter.validate_signal(
-                    signal, combined_confidence, features, market_context
-                )
-                
-                if not is_valid:
-                    ProfessionalLogger.log(f"Signal rejected by filter: {filter_reason}", "FILTER", "ENGINE")
-                    time.sleep(60)
-                    continue
-                
-                # Entry Timing Confirmation
-                if Config.USE_CONFIRMATION_ENTRY:
-                    should_enter, entry_reason = self.entry_timing.should_enter(
-                        signal, combined_confidence, features, df_current
-                    )
+            except Exception as e:
+                ProfessionalLogger.log(f"ATR calculation error: {e}", "WARNING", "EXECUTOR")
+                return 0.001  # Default small value
+        def run(self):
+            """Main execution method"""
+            print("\n" + "=" * 70)
+            print("🤖 ENHANCED PROFESSIONAL MT5 ALGORITHMIC TRADING SYSTEM")
+            print("📊 Advanced Statistical Analysis | Dynamic Labeling | Regime-Aware Models")
+            print("=" * 70 + "\n")
+            
+            ProfessionalLogger.log("Starting enhanced trading system with all improvements...", "INFO", "ENGINE")
+            
+            if not self.connect_mt5():
+                return
+            
+            self.train_initial_model()
+            
+            self.run_enhanced_live_trading()
+        
+        def run_enhanced_live_trading(self):
+            """Enhanced live trading with all new features"""
+            ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
+            ProfessionalLogger.log("STARTING ENHANCED LIVE TRADING", "TRADE", "ENGINE")
+            ProfessionalLogger.log(f"Dynamic Barriers: {'ENABLED' if Config.USE_DYNAMIC_BARRIERS else 'DISABLED'}", "INFO", "ENGINE")
+            ProfessionalLogger.log(f"Entry Confirmation: {'ENABLED' if Config.USE_CONFIRMATION_ENTRY else 'DISABLED'}", "INFO", "ENGINE")
+            ProfessionalLogger.log(f"Parameter Optimization: {'ENABLED' if Config.PARAM_OPTIMIZATION_ENABLED else 'DISABLED'}", "INFO", "ENGINE")
+            ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
+            
+            try:
+                while True:
+                    self.run_periodic_tasks()
                     
-                    if not should_enter:
-                        ProfessionalLogger.log(f"Entry delayed: {entry_reason}", "CONFIRMATION", "ENGINE")
-                        time.sleep(60)
+                    required_lookback = max(500, Config.TREND_MA * 2) 
+                    
+                    rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
+                    if rates is None or len(rates) < Config.TREND_MA + 10:
+                        ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
+                        time.sleep(10)
                         continue
-                
-                # Log comprehensive signal analysis
-                signal_type = "BUY" if signal == 1 else "SELL"
-                status_msg = (f"Signal Analysis | {signal_type} | "
-                            f"Model Conf: {confidence:.1%} | "
-                            f"Agreement: {agreement:.0%} | ")
-                
-                if Config.MULTI_TIMEFRAME_ENABLED:
-                    status_msg += f"Multi-TF Align: {multi_tf_alignment:.0%} | "
-                    status_msg += f"Combined Conf: {combined_confidence:.1%}"
-                else:
-                    status_msg += f"Price: {df_current['close'].iloc[-1]:.2f}"
-                
-                ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
-                
-                # Log key features
-                if features:
-                    key_features = {
-                        'rsi': features.get('rsi_normalized', 0) * 50 + 50,
-                        'volatility': features.get('volatility', 0),
-                        'regime': features.get('regime_encoded', 0),
-                        'atr_percent': features.get('atr_percent', 0)
-                    }
-                    ProfessionalLogger.log(
-                        f"Key Features: RSI={key_features['rsi']:.1f} | "
-                        f"Vol={key_features['volatility']:.4f} | "
-                        f"Regime={key_features['regime']} | "
-                        f"ATR%={key_features['atr_percent']:.4f}",
-                        "DATA", "ENGINE"
-                    )
-                
-                # ==========================================
-                # TRADE EXECUTION DECISION
-                # ==========================================
-                execute_trade = False
-                execution_reason = ""
-                
-                if (combined_confidence >= min_confidence_override and 
-                    agreement >= min_agreement_override):
+                    
+                    df_current = pd.DataFrame(rates)
+                    
+                    # ==========================================
+                    # MULTI-TIMEFRAME ANALYSIS
+                    # ==========================================
+                    multi_tf_signal = None
+                    multi_tf_confidence = 0
+                    multi_tf_alignment = 0
+                    min_confidence_override = Config.MIN_CONFIDENCE
+                    min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
                     
                     if Config.MULTI_TIMEFRAME_ENABLED:
-                        if multi_tf_alignment >= Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
-                            execute_trade = True
-                            execution_reason = "Strong multi-TF alignment"
-                        elif combined_confidence > (min_confidence_override * 1.5):
-                            execute_trade = True
-                            execution_reason = f"Very high confidence ({combined_confidence:.1%})"
-                        else:
-                            execution_reason = f"Low multi-TF alignment ({multi_tf_alignment:.0%})"
-                    else:
-                        execute_trade = True
-                        execution_reason = "Standard model signal"
-                
-                if execute_trade:
-                    ProfessionalLogger.log(
-                        f"🎯 {execution_reason} - Executing {signal_type} signal! | "
-                        f"Combined Confidence: {combined_confidence:.1%}",
-                        "SUCCESS", "ENGINE"
+                        try:
+                            mtf_recommendation = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
+                            
+                            if mtf_recommendation:
+                                multi_tf_signal = mtf_recommendation.get('consensus_signal')
+                                multi_tf_confidence = mtf_recommendation.get('confidence', 0)
+                                multi_tf_alignment = mtf_recommendation.get('alignment_score', 0)
+                                trend_filter_passed = mtf_recommendation.get('trend_filter_passed', True)
+                                
+                                recommendation = mtf_recommendation.get('recommendation', 'HOLD')
+                                ProfessionalLogger.log(
+                                    f"Multi-TF: {recommendation} | "
+                                    f"Align: {multi_tf_alignment:.0%} | "
+                                    f"Conf: {multi_tf_confidence:.0%} | "
+                                    f"Trend Filter: {'PASS' if trend_filter_passed else 'FAIL'}",
+                                    "ANALYSIS", "MULTI_TF"
+                                )
+                                
+                                if not trend_filter_passed:
+                                    ProfessionalLogger.log("Trade blocked by H1 trend filter", "WARNING", "MULTI_TF")
+                                    signal = None
+                                
+                                elif multi_tf_alignment < Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
+                                    min_confidence_override = Config.MIN_CONFIDENCE * 1.3
+                                    min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 1.2
+                                    ProfessionalLogger.log(
+                                        f"Low alignment ({multi_tf_alignment:.0%} < {Config.TIMEFRAME_ALIGNMENT_THRESHOLD:.0%}) - "
+                                        f"raising thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
+                                        "WARNING", "MULTI_TF"
+                                    )
+                                
+                                elif recommendation in ['STRONG_BUY', 'STRONG_SELL']:
+                                    min_confidence_override = Config.MIN_CONFIDENCE * 0.9
+                                    min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 0.9
+                                    ProfessionalLogger.log(
+                                        f"Strong multi-TF signal - "
+                                        f"lowering thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
+                                        "INFO", "MULTI_TF"
+                                    )
+                                    
+                        except Exception as e:
+                            ProfessionalLogger.log(f"Multi-TF analysis error: {str(e)}", "ERROR", "MULTI_TF")
+                            min_confidence_override = Config.MIN_CONFIDENCE
+                            min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
+                    
+                    # ==========================================
+                    # MAIN MODEL PREDICTION
+                    # ==========================================
+                    signal, confidence, features, model_details = self.model.predict(df_current)
+                    
+                    # ==========================================
+                    # ADAPTIVE EXIT LOGIC
+                    # ==========================================
+                    df_features = self.feature_engine.calculate_features(df_current)
+                    
+                    if self.active_positions:
+                        self.exit_manager.manage_positions(
+                            df_features, 
+                            self.active_positions, 
+                            signal, 
+                            confidence
+                        )
+                    
+                    # ==========================================
+                    # SIGNAL VALIDATION & FILTERING
+                    # ==========================================
+                    if signal is None:
+                        if self.iteration % 30 == 0:
+                            tick = mt5.symbol_info_tick(Config.SYMBOL)
+                            if tick:
+                                price = tick.ask
+                                positions = self.get_current_positions()
+                                ProfessionalLogger.log(
+                                    f"Waiting for signal | Price: {price:.2f} | "
+                                    f"Positions: {positions} | "
+                                    f"Multi-TF: {multi_tf_signal if multi_tf_signal is not None else 'N/A'}",
+                                    "INFO", "ENGINE"
+                                )
+                        time.sleep(60)
+                        continue
+                    
+                    # Calculate model agreement
+                    agreement = 0
+                    if model_details:
+                        predictions = [m['prediction'] for m in model_details.values() 
+                                    if m['prediction'] != -1]
+                        if predictions:
+                            agreement = predictions.count(signal) / len(predictions)
+                    
+                    # Multi-TF validation
+                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
+                        if multi_tf_signal != 0.5:
+                            signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
+                                        (signal == 0 and multi_tf_signal < 0.4)
+                            
+                            if not signal_match:
+                                ProfessionalLogger.log(
+                                    f"Model signal ({'BUY' if signal == 1 else 'SELL'}) "
+                                    f"rejected by multi-TF consensus ({multi_tf_signal:.2f})",
+                                    "WARNING", "MULTI_TF"
+                                )
+                                time.sleep(60)
+                                continue
+                    
+                    # Combined confidence
+                    combined_confidence = confidence
+                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_confidence > 0:
+                        combined_confidence = (confidence * 0.7) + (multi_tf_confidence * 0.3)
+                    
+                    # Signal Quality Filtering
+                    market_context = {
+                        'volatility_regime': features.get('volatility_regime', 1),
+                        'spread_pips': 2,  # Default
+                        'hour': datetime.now().hour,
+                        'high_impact_news_soon': False,
+                        'existing_positions': list(self.active_positions.values()),
+                        'vol_surprise': features.get('vol_surprise', 0),
+                        'market_regime': self.last_regime,
+                        'multi_tf_alignment': multi_tf_alignment
+                    }
+                    
+                    is_valid, filter_reason = self.signal_filter.validate_signal(
+                        signal, combined_confidence, features, market_context
                     )
                     
-                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
-                        if 'multi_tf' not in model_details:
-                            model_details['multi_tf'] = {}
-                        model_details['multi_tf'].update({
-                            'consensus_signal': multi_tf_signal,
-                            'alignment_score': multi_tf_alignment,
-                            'confidence': multi_tf_confidence,
-                            'min_thresholds_applied': {
-                                'confidence': min_confidence_override,
-                                'agreement': min_agreement_override
-                            }
-                        })
+                    if not is_valid:
+                        ProfessionalLogger.log(f"Signal rejected by filter: {filter_reason}", "FILTER", "ENGINE")
+                        time.sleep(60)
+                        continue
                     
-                    self.execute_trade(signal, combined_confidence, df_current, features, model_details)
-                else:
-                    if self.iteration % 10 == 0:
-                        ProfessionalLogger.log(
-                            f"Signal rejected | Reason: {execution_reason} | "
-                            f"Conf: {combined_confidence:.1%} (need {min_confidence_override:.1%}) | "
-                            f"Agree: {agreement:.0%} (need {min_agreement_override:.0%})",
-                            "INFO", "ENGINE"
+                    # Entry Timing Confirmation
+                    if Config.USE_CONFIRMATION_ENTRY:
+                        should_enter, entry_reason = self.entry_timing.should_enter(
+                            signal, combined_confidence, features, df_current
                         )
-                
-                self.update_performance_metrics()
-                
-                sleep_time = 60
-                
-                if Config.MULTI_TIMEFRAME_ENABLED:
-                    if features and 'volatility' in features:
-                        vol = features['volatility']
-                        if vol > 0.015:
-                            sleep_time = 30
-                        elif vol < 0.005:
-                            sleep_time = 90
+                        
+                        if not should_enter:
+                            ProfessionalLogger.log(f"Entry delayed: {entry_reason}", "CONFIRMATION", "ENGINE")
+                            time.sleep(60)
+                            continue
                     
-                    if execute_trade or self.active_positions:
-                        sleep_time = max(30, sleep_time // 2)
-                
-                time.sleep(sleep_time)
-                
-        except KeyboardInterrupt:
-            ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
-        except Exception as e:
-            ProfessionalLogger.log(f"Unexpected error in live trading: {str(e)}", "ERROR", "ENGINE")
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.print_performance_report()
-            mt5.shutdown()
-            ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
+                    # Log comprehensive signal analysis
+                    signal_type = "BUY" if signal == 1 else "SELL"
+                    status_msg = (f"Signal Analysis | {signal_type} | "
+                                f"Model Conf: {confidence:.1%} | "
+                                f"Agreement: {agreement:.0%} | ")
+                    
+                    if Config.MULTI_TIMEFRAME_ENABLED:
+                        status_msg += f"Multi-TF Align: {multi_tf_alignment:.0%} | "
+                        status_msg += f"Combined Conf: {combined_confidence:.1%}"
+                    else:
+                        status_msg += f"Price: {df_current['close'].iloc[-1]:.2f}"
+                    
+                    ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
+                    
+                    # Log key features
+                    if features:
+                        key_features = {
+                            'rsi': features.get('rsi_normalized', 0) * 50 + 50,
+                            'volatility': features.get('volatility', 0),
+                            'regime': features.get('regime_encoded', 0),
+                            'atr_percent': features.get('atr_percent', 0)
+                        }
+                        ProfessionalLogger.log(
+                            f"Key Features: RSI={key_features['rsi']:.1f} | "
+                            f"Vol={key_features['volatility']:.4f} | "
+                            f"Regime={key_features['regime']} | "
+                            f"ATR%={key_features['atr_percent']:.4f}",
+                            "DATA", "ENGINE"
+                        )
+                    
+                    # ==========================================
+                    # TRADE EXECUTION DECISION
+                    # ==========================================
+                    execute_trade = False
+                    execution_reason = ""
+                    
+                    if (combined_confidence >= min_confidence_override and 
+                        agreement >= min_agreement_override):
+                        
+                        if Config.MULTI_TIMEFRAME_ENABLED:
+                            if multi_tf_alignment >= Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
+                                execute_trade = True
+                                execution_reason = "Strong multi-TF alignment"
+                            elif combined_confidence > (min_confidence_override * 1.5):
+                                execute_trade = True
+                                execution_reason = f"Very high confidence ({combined_confidence:.1%})"
+                            else:
+                                execution_reason = f"Low multi-TF alignment ({multi_tf_alignment:.0%})"
+                        else:
+                            execute_trade = True
+                            execution_reason = "Standard model signal"
+                    
+                    if execute_trade:
+                        ProfessionalLogger.log(
+                            f"🎯 {execution_reason} - Executing {signal_type} signal! | "
+                            f"Combined Confidence: {combined_confidence:.1%}",
+                            "SUCCESS", "ENGINE"
+                        )
+                        
+                        if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
+                            if 'multi_tf' not in model_details:
+                                model_details['multi_tf'] = {}
+                            model_details['multi_tf'].update({
+                                'consensus_signal': multi_tf_signal,
+                                'alignment_score': multi_tf_alignment,
+                                'confidence': multi_tf_confidence,
+                                'min_thresholds_applied': {
+                                    'confidence': min_confidence_override,
+                                    'agreement': min_agreement_override
+                                }
+                            })
+                        
+                        self.execute_trade(signal, combined_confidence, df_current, features, model_details)
+                    else:
+                        if self.iteration % 10 == 0:
+                            ProfessionalLogger.log(
+                                f"Signal rejected | Reason: {execution_reason} | "
+                                f"Conf: {combined_confidence:.1%} (need {min_confidence_override:.1%}) | "
+                                f"Agree: {agreement:.0%} (need {min_agreement_override:.0%})",
+                                "INFO", "ENGINE"
+                            )
+                    
+                    self.update_performance_metrics()
+                    
+                    sleep_time = 60
+                    
+                    if Config.MULTI_TIMEFRAME_ENABLED:
+                        if features and 'volatility' in features:
+                            vol = features['volatility']
+                            if vol > 0.015:
+                                sleep_time = 30
+                            elif vol < 0.005:
+                                sleep_time = 90
+                        
+                        if execute_trade or self.active_positions:
+                            sleep_time = max(30, sleep_time // 2)
+                    
+                    time.sleep(sleep_time)
+                    
+            except KeyboardInterrupt:
+                ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
+            except Exception as e:
+                ProfessionalLogger.log(f"Unexpected error in live trading: {str(e)}", "ERROR", "ENGINE")
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.print_performance_report()
+                mt5.shutdown()
+                ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
 
 # ==========================================
 # MAIN FUNCTION
