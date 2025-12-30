@@ -68,7 +68,7 @@ class Config:
     MAX_RISK_PER_TRADE = 100
     
     # Signal Quality - Dynamic thresholds
-    MIN_CONFIDENCE = 0.40
+    MIN_CONFIDENCE = 0.55
     MIN_ENSEMBLE_AGREEMENT = 0.50
     
     # Position Limits
@@ -104,8 +104,8 @@ class Config:
     MIN_ACCURACY_THRESHOLD = 0.50
     
     # Walk-Forward Optimization
-    WALK_FORWARD_WINDOW = 1000
-    WALK_FORWARD_STEP = 100
+    WALK_FORWARD_WINDOW = 2500      # Increased for better learning per fold
+    WALK_FORWARD_STEP = 500
     WALK_FORWARD_FOLDS = 5
     
     # Feature Engineering Flags
@@ -119,7 +119,7 @@ class Config:
     USE_DYNAMIC_BARRIERS = True  # New: Dynamic ATR-based barriers
     BARRIER_UPPER = 0.0020
     BARRIER_LOWER = -0.0015
-    BARRIER_TIME = 6
+    BARRIER_TIME = 12                # Increased from 6 to give price more room
     
     # Ensemble Configuration - ENHANCED
     USE_STACKING_ENSEMBLE = True
@@ -1748,9 +1748,9 @@ class EnhancedFeatureEngine:
         # Calculate dynamic barriers based on rolling ATR
         atr_percent = df['atr_percent'].rolling(20).mean().fillna(0.001)
         
-        # Dynamic barriers: 2x ATR for profit, 1.5x ATR for stop
-        upper_barriers = atr_percent * 2.0
-        lower_barriers = -atr_percent * 1.5
+        # Dynamic barriers: 1.8x ATR for profit, 1.2x ATR for stop (More reachable)
+        upper_barriers = atr_percent * 1.8
+        lower_barriers = -atr_percent * 1.2
         
         labels = np.zeros(len(df))
         barrier_time = Config.BARRIER_TIME
@@ -3656,7 +3656,14 @@ class MultiTimeframeAnalyser:
             return analysis
         
         weighted_signal = np.average(signals, weights=weights)
-        analysis['consensus_signal'] = 1 if weighted_signal > 0.5 else 0 if weighted_signal < -0.5 else 0.5
+        
+        # Fixed: Corrected consensus mapping for 0-1 probability range
+        if weighted_signal > 0.52:
+            analysis['consensus_signal'] = 1
+        elif weighted_signal < 0.48:
+            analysis['consensus_signal'] = 0
+        else:
+            analysis['consensus_signal'] = 0.5
         
         signal_directions = [1 if s == 1 else -1 if s == 0 else 0 for s in signals]
         if len(signal_directions) > 1:
@@ -3774,16 +3781,11 @@ class MultiTimeframeAnalyser:
         # Apply timeframe multiplier
         signal_score *= timeframe_multiplier
         
-        # Get signal thresholds from config
-        buy_threshold = mtf_params.get('BUY_SIGNAL_THRESHOLD', 0.5)
-        sell_threshold = mtf_params.get('SELL_SIGNAL_THRESHOLD', -0.5)
-        
-        # Normalize score and apply thresholds
         normalized_score = max(-1, min(1, signal_score / 4))
         
-        if normalized_score > buy_threshold:
+        if normalized_score > 0.4:
             return 1
-        elif normalized_score < sell_threshold:
+        elif normalized_score < -0.4:
             return 0
         else:
             return 0.5
