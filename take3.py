@@ -94,12 +94,12 @@ class Config:
     # ==========================================
     # MACHINE LEARNING MODEL PARAMETERS - ENHANCED
     # ==========================================
-    LOOKBACK_BARS = 8000
+    LOOKBACK_BARS = 12000
     TRAINING_MIN_SAMPLES = 5000
     VALIDATION_SPLIT = 0.20
     
     # Retraining Schedule
-    RETRAIN_HOURS = 24
+    RETRAIN_HOURS = 8
     RETRAIN_ON_PERFORMANCE_DROP = True
     MIN_ACCURACY_THRESHOLD = 0.50
     
@@ -299,7 +299,7 @@ class Config:
     # NEW: PARAMETER OPTIMIZATION
     # ==========================================
     OPTIMIZATION_WINDOW = 500
-    OPTIMIZE_EVERY_N_TRADES = 50
+    OPTIMIZE_EVERY_N_TRADES = 20
     PARAM_OPTIMIZATION_ENABLED = True
     
     # ==========================================
@@ -312,10 +312,14 @@ class Config:
     # ==========================================
     # DATA STORAGE & LOGGING
     # ==========================================
-    TRADE_HISTORY_FILE = "trade_history_xauusd.json"
-    MODEL_SAVE_FILE = "ensemble_model_xauusd.pkl"
-    BACKTEST_RESULTS_FILE = "backtest_results_xauusd.json"
-    PERFORMANCE_LOG_FILE = "performance_log_xauusd.csv"
+    CACHE_DIR = "cache"
+    TRADE_HISTORY_FILE = os.path.join(CACHE_DIR, "trade_history_xauusd.json")
+    MODEL_SAVE_FILE = os.path.join(CACHE_DIR, "ensemble_model_xauusd.pkl")
+    ENGINE_STATE_FILE = os.path.join(CACHE_DIR, "engine_state.json")
+    MARKET_INSIGHTS_FILE = os.path.join(CACHE_DIR, "market_insights.json")
+    
+    BACKTEST_RESULTS_FILE = os.path.join(CACHE_DIR, "backtest_results_xauusd.json")
+    PERFORMANCE_LOG_FILE = os.path.join(CACHE_DIR, "performance_log_xauusd.csv")
     
     MEMORY_SIZE = 1000
     LEARNING_WEIGHT = 0.4
@@ -2359,6 +2363,8 @@ class EnhancedEnsemble:
         self.final_scaler = None
         self.is_trained = False
         self.last_train_time = None
+        self.trades_at_last_train = 0
+        self.force_retrain_flag = False
         self.training_metrics = {}
         self.trained_feature_columns = None
         self.fitted_base_models = {}
@@ -2520,6 +2526,8 @@ class EnhancedEnsemble:
             
             self.is_trained = True
             self.last_train_time = datetime.now()
+            self.trades_at_last_train = len(self.trade_memory.trades)
+            self.force_retrain_flag = False
             self.training_metrics = {'avg_cv_score': avg_score}
             
             ProfessionalLogger.log(f"✅ Training Complete | WFO Accuracy: {avg_score:.2%}", "SUCCESS", "ENSEMBLE")
@@ -2611,11 +2619,21 @@ class EnhancedEnsemble:
         return {'is_valid': True, 'reason': None}
     
     def should_retrain(self):
-        """Check if retraining is needed"""
-        if not self.last_train_time: 
+        """Check if retraining is needed based on time, performance, or manual triggers"""
+        if not self.last_train_time or self.force_retrain_flag: 
             return True
+            
+        # Time-based trigger
         hours_since = (datetime.now() - self.last_train_time).total_seconds() / 3600
-        return hours_since >= Config.RETRAIN_HOURS
+        if hours_since >= Config.RETRAIN_HOURS:
+            return True
+            
+        # Activity-based trigger (every N new finished trades)
+        new_trades = len(self.trade_memory.trades) - self.trades_at_last_train
+        if new_trades >= Config.OPTIMIZE_EVERY_N_TRADES:
+            return True
+            
+        return False
     
     def get_diagnostics(self):
         """Get comprehensive model diagnostics"""
@@ -3931,6 +3949,20 @@ class ProfessionalTradeMemory:
         else:
             stats['profit_factor'] = float('inf')
             
+        # Excursion Analysis
+        mfe_list = [t.get('mfe_points', 0) for t in completed]
+        mae_list = [t.get('mae_points', 0) for t in completed]
+        eff_list = [t.get('tp_efficiency', 0) for t in completed if 'tp_efficiency' in t]
+        
+        if mfe_list:
+            stats['avg_mfe'] = np.mean(mfe_list)
+            stats['avg_mae'] = np.mean(mae_list)
+            stats['max_mfe'] = max(mfe_list)
+            stats['max_mae'] = min(mae_list)
+            
+        if eff_list:
+            stats['avg_tp_efficiency'] = np.mean(eff_list)
+            
         return stats
 
 # ==========================================
@@ -3973,6 +4005,10 @@ class EnhancedTradingEngine:
         self.equity_curve = []
         self.returns_series = []
         self.risk_metrics_history = []
+        self.initial_analysis = {}
+        
+        # Load previous state if exists
+        self._load_engine_state()
         
         ProfessionalLogger.log("Enhanced Trading Engine initialized with all improvements", "INFO", "ENGINE")
     
@@ -4120,6 +4156,9 @@ class EnhancedTradingEngine:
         
         current_tickets = [pos.ticket for pos in positions]
         
+        # Track MFE/MAE for active positions
+        self._track_excursion(positions)
+        
         for ticket in list(self.active_positions.keys()):
             if ticket not in current_tickets:
                 trade_data = self.active_positions[ticket]
@@ -4136,13 +4175,20 @@ class EnhancedTradingEngine:
                             close_price = deal.price
                             returns = (close_price - open_price) / open_price if signal == 1 else (open_price - close_price) / open_price
                             
+                            # Final MFE/MAE calculation
+                            mfe = trade_data.get('mfe_points', 0)
+                            mae = trade_data.get('mae_points', 0)
+                            
                             outcome = {
                                 'profit': deal.profit,
                                 'close_price': deal.price,
                                 'close_time': int(deal.time),
                                 'status': 'closed',
                                 'returns': returns,
-                                'duration': int(deal.time) - trade_data['open_time']
+                                'duration': int(deal.time) - trade_data['open_time'],
+                                'mfe_points': mfe,
+                                'mae_points': mae,
+                                'tp_efficiency': (returns * 10000) / trade_data.get('tp_points', 1) if 'tp_points' in trade_data else 0
                             }
                             trade_data.update(outcome)
                             
@@ -4150,11 +4196,90 @@ class EnhancedTradingEngine:
                             self.returns_series.append(returns)
                             
                             profit_loss = "profit" if deal.profit > 0 else "loss"
-                            ProfessionalLogger.log(f"Trade #{ticket} closed with {profit_loss} | P/L: ${deal.profit:.2f}", 
-                                                 "SUCCESS" if deal.profit > 0 else "WARNING", "ENGINE")
+                            ProfessionalLogger.log(
+                                f"Trade #{ticket} closed with {profit_loss} | P/L: ${deal.profit:.2f} | "
+                                f"MFE: {mfe:.1f} pts | MAE: {mae:.1f} pts", 
+                                "SUCCESS" if deal.profit > 0 else "WARNING", "ENGINE"
+                            )
                             break
                 
                 del self.active_positions[ticket]
+                self._save_engine_state()
+
+    def _track_excursion(self, current_positions):
+        """Track Maximum Favorable and Adverse Excursions for active positions"""
+        if not current_positions:
+            return
+            
+        for pos in current_positions:
+            ticket = pos.ticket
+            if ticket not in self.active_positions:
+                continue
+                
+            trade = self.active_positions[ticket]
+            current_price = pos.price_current
+            open_price = pos.price_open
+            symbol_info = mt5.symbol_info(trade['symbol'])
+            point = symbol_info.point if symbol_info and symbol_info.point > 0 else 0.01
+            
+            # Distance in points
+            if trade['signal'] == 1: # BUY
+                floating_points = (current_price - open_price) / point
+            else: # SELL
+                floating_points = (open_price - current_price) / point
+                
+            # Update MFE (Max profit)
+            trade['mfe_points'] = max(trade.get('mfe_points', 0), floating_points)
+            
+            # Update MAE (Max drawdown)
+            trade['mae_points'] = min(trade.get('mae_points', 0), floating_points)
+            
+    def _save_engine_state(self):
+        """Save current engine state to cache"""
+        try:
+            state = {
+                'active_positions': self.active_positions,
+                'initial_analysis': self.initial_analysis,
+                'last_regime': self.last_regime,
+                'risk_metrics_history': self.risk_metrics_history,
+                'equity_curve': self.equity_curve,
+                'returns_series': self.returns_series,
+                'last_analysis_time': self.last_analysis_time.isoformat() if self.last_analysis_time else None,
+                'iteration': self.iteration
+            }
+            
+            with open(Config.ENGINE_STATE_FILE, 'w') as f:
+                json.dump(state, f, default=str)
+                
+        except Exception as e:
+            ProfessionalLogger.log(f"Failed to save engine state: {e}", "ERROR", "ENGINE")
+
+    def _load_engine_state(self):
+        """Load engine state from cache"""
+        if not os.path.exists(Config.ENGINE_STATE_FILE):
+            return
+            
+        try:
+            with open(Config.ENGINE_STATE_FILE, 'r') as f:
+                state = json.load(f)
+                
+            # Note: active_positions tickets will be strings after JSON load, need to convert back to int
+            self.active_positions = {int(k): v for k, v in state.get('active_positions', {}).items()}
+            self.initial_analysis = state.get('initial_analysis', {})
+            self.last_regime = state.get('last_regime')
+            self.risk_metrics_history = state.get('risk_metrics_history', [])
+            self.equity_curve = state.get('equity_curve', [])
+            self.returns_series = state.get('returns_series', [])
+            self.iteration = state.get('iteration', 0)
+            
+            last_time_str = state.get('last_analysis_time')
+            if last_time_str:
+                self.last_analysis_time = datetime.fromisoformat(last_time_str)
+                
+            ProfessionalLogger.log(f"Restored engine state from cache ({len(self.active_positions)} positions)", "SUCCESS", "ENGINE")
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Failed to load engine state: {e}", "ERROR", "ENGINE")
     
     def get_broker_time(self):
         """Get current broker time from symbol info"""
@@ -4220,6 +4345,7 @@ class EnhancedTradingEngine:
         
         if self.iteration % 30 == 0:
             self.print_status()
+            self._save_engine_state()
     
     def _apply_optimized_params(self, optimized_params):
         """Apply optimized parameters"""
@@ -4255,8 +4381,9 @@ class EnhancedTradingEngine:
                                          "ANALYSIS", "ENGINE")
                 
                 if hasattr(self, 'last_regime') and self.last_regime != current_regime:
-                    ProfessionalLogger.log(f"⚠ Market regime changed from {self.last_regime} to {current_regime}", 
+                    ProfessionalLogger.log(f"⚠ Market regime changed from {self.last_regime} to {current_regime} | Triggering immediate retraining", 
                                          "WARNING", "ENGINE")
+                    self.model.force_retrain_flag = True
                 
                 self.last_regime = current_regime
     
@@ -4305,6 +4432,10 @@ class EnhancedTradingEngine:
             
             if stats and stats.get('total_trades', 0) > 0:
                 status_msg += f" | Trades: {stats['total_trades']} | Win Rate: {stats.get('win_rate', 0):.1%}"
+                
+                # Add MFE/MAE insight if available
+                mfe_avg = stats.get('avg_mfe', 0)
+                status_msg += f" | Avg MFE: {mfe_avg:.1f} pts"
             
             ProfessionalLogger.log(status_msg, "INFO", "ENGINE")
     
@@ -4322,8 +4453,23 @@ class EnhancedTradingEngine:
         ProfessionalLogger.log(f"Win Rate: {stats['win_rate']:.1%}", "PERFORMANCE", "ENGINE")
         ProfessionalLogger.log(f"Total Profit: ${stats['total_profit']:.2f}", "PERFORMANCE", "ENGINE")
         ProfessionalLogger.log(f"Average Profit: ${stats['mean_profit']:.2f}", "PERFORMANCE", "ENGINE")
-        ProfessionalLogger.log(f"Profit Std Dev: ${stats['std_profit']:.2f}", "PERFORMANCE", "ENGINE")
         ProfessionalLogger.log(f"Profit Factor: {stats['profit_factor']:.2f}", "PERFORMANCE", "ENGINE")
+        
+        # MFE/MAE Post-Mortem Analysis
+        if 'avg_mfe' in stats:
+            ProfessionalLogger.log("-" * 35, "PERFORMANCE", "ENGINE")
+            ProfessionalLogger.log(f"📈 EXCURSION ANALYSIS (MFE/MAE):", "PERFORMANCE", "ENGINE")
+            ProfessionalLogger.log(f"  Avg Max Favorable (MFE): {stats['avg_mfe']:.1f} pts", "PERFORMANCE", "ENGINE")
+            ProfessionalLogger.log(f"  Avg Max Adverse (MAE): {stats['avg_mae']:.1f} pts", "PERFORMANCE", "ENGINE")
+            
+            efficiency = stats.get('avg_tp_efficiency', 0)
+            ProfessionalLogger.log(f"  TP Efficiency: {efficiency:.1%}", "PERFORMANCE", "ENGINE")
+            
+            if efficiency < 0.3 and stats['win_rate'] > 0.6:
+                ProfessionalLogger.log("  💡 TIP: TP targets might be too conservative (low efficiency).", "INFO", "ENGINE")
+            elif efficiency > 0.8:
+                ProfessionalLogger.log("  💡 TIP: TP targets are highly optimal.", "SUCCESS", "ENGINE")
+            ProfessionalLogger.log("-" * 35, "PERFORMANCE", "ENGINE")
         
         if len(self.risk_metrics_history) > 0:
             latest_metrics = self.risk_metrics_history[-1]['metrics']
@@ -4584,14 +4730,19 @@ class EnhancedTradingEngine:
                 'open_price': entry_price,
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
+                'sl_points': sl_distance_points,
+                'tp_points': tp_distance_points,
                 'open_time': int(time.time()),
                 'confidence': confidence,
                 'features': features,
                 'model_details': model_details,
-                'status': 'open'
+                'status': 'open',
+                'mfe_points': 0,
+                'mae_points': 0
             }
             
             self.active_positions[result.order] = trade_data
+            self._save_engine_state()
             
             ProfessionalLogger.log(
                 f"✅ Trade Opened: #{result.order} | {trade_type_str} {volume:.3f} @ {entry_price:.5f} | "
