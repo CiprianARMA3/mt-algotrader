@@ -42,8 +42,8 @@ class Config:
     # ==========================================
     # MT5 CONNECTION
     # ==========================================
-    MT5_LOGIN = int(os.getenv("MT5_LOGIN", 5044108820))
-    MT5_PASSWORD = os.getenv("MT5_PASSWORD", "@rC1KbQb")
+    MT5_LOGIN = int(os.getenv("MT5_LOGIN", 5044241746))
+    MT5_PASSWORD = os.getenv("MT5_PASSWORD", "!kAd2ePr")
     MT5_SERVER = os.getenv("MT5_SERVER", "MetaQuotes-Demo")
     
     # ==========================================
@@ -53,9 +53,9 @@ class Config:
     TIMEFRAME = mt5.TIMEFRAME_M5
     
     # Position sizing with enhanced scaling
-    BASE_VOLUME = 0.10
-    MAX_VOLUME = 1.00
-    MIN_VOLUME = 0.10
+    BASE_VOLUME = 0.01
+    MAX_VOLUME = 0.05
+    MIN_VOLUME = 0.01
     VOLUME_STEP = 0.01
     
     MAGIC_NUMBER = 998877
@@ -68,7 +68,7 @@ class Config:
     MAX_RISK_PER_TRADE = 100
     
     # Signal Quality - Dynamic thresholds
-    MIN_CONFIDENCE = 0.425
+    MIN_CONFIDENCE = 0.40
     MIN_ENSEMBLE_AGREEMENT = 0.50
     
     # Position Limits
@@ -83,9 +83,22 @@ class Config:
     MAX_CONSECUTIVE_LOSSES = 3
     
     # Kelly Criterion
-    KELLY_FRACTION = 0.15
-    USE_HALF_KELLY = True
+    KELLY_FRACTION = 0.25      # Conservative Fraction (Quarter Kelly)
+    USE_KELLY_CRITERION = True
+    MAX_KELLY_RISK = 0.05      # Hard cap on Kelly risk (5%)
     
+    # Volatility Sizing (Smart Risk)
+    VOLATILITY_SCALING_ENABLED = True
+    HIGH_VOL_THRESHOLD = 0.0025       # ~25 pips per 5min candle on Gold is high
+    LOW_VOL_THRESHOLD = 0.0008        # ~8 pips is low
+    HIGH_VOL_SIZE_MULTIPLIER = 0.5    # Half size in storms
+    LOW_VOL_SIZE_MULTIPLIER = 1.5     # 1.5x size in calm
+    
+    # News / Event Filter
+    NEWS_FILTER_ENABLED = True
+    MAX_SPREAD_PIPS = 3.5             # Block trade if spread > 3.5 pips (News Proxy)
+    VOLATILITY_SPIKE_THRESHOLD = 3.0  # Block if Vol Z-Score > 3 (Sudden explosion)
+
     # Statistical Risk Metrics
     VAR_CONFIDENCE = 0.99
     CVAR_CONFIDENCE = 0.99
@@ -179,7 +192,7 @@ class Config:
     ATR_TP_MULTIPLIER = 1.75
     
     # Minimum Risk/Reward
-    MIN_RR_RATIO = 1.20
+    MIN_RR_RATIO = 1.175
     
     # Fixed Stops
     FIXED_SL_PERCENT = 0.0035
@@ -1031,6 +1044,51 @@ class EnhancedFeatureEngine:
         self.risk_metrics = ProfessionalRiskMetrics()
         self.last_garch_time = None
         self.cached_garch = 0
+    
+    def _calculate_shannon_entropy(self, x):
+        """Calculate Shannon Entropy to measure market noise"""
+        try:
+            # Normalized probability distribution
+            hist, _ = np.histogram(x, bins='doane', density=True)
+            hist = hist[hist > 0]
+            return -np.sum(hist * np.log(hist))
+        except:
+            return 0
+
+    def _calculate_hurst(self, ts):
+        """Calculate Hurst Exponent to measure trend persistence"""
+        try:
+            lags = range(2, 20)
+            # Calculate standard deviation of differences for various lags
+            tau = [np.std(np.subtract(ts[lag:], ts[:-lag])) for lag in lags]
+            # Linear fit to log-log plot
+            poly = np.polyfit(np.log(lags), np.log(tau), 1)
+            return poly[0] * 2.0
+        except:
+            return 0.5
+            
+    def _calculate_garch_volatility(self, returns):
+        """Forecast Volatility using GARCH(1,1)"""
+        try:
+            # Need minimum 100 observations for stable GARCH
+            if len(returns) < 100:
+                return returns.std()
+                
+            # Fit GARCH(1,1)
+            # Rescale returns for convergence (GARCH likes returns * 10 or 100)
+            scaled_returns = returns * 100
+            model = arch_model(scaled_returns, vol='Garch', p=1, q=1, dist='Normal')
+            res = model.fit(disp='off', show_warning=False)
+            
+            # Forecast next period
+            forecast = res.forecast(horizon=1)
+            next_var = forecast.variance.iloc[-1, 0]
+            next_vol = np.sqrt(next_var) / 100 # Scale back down
+            
+            return next_vol
+        except:
+             # Fallback to simple std
+             return returns.std()
         
     def calculate_features(self, df):
         """Calculate comprehensive features with price action patterns"""
@@ -1489,6 +1547,37 @@ class EnhancedFeatureEngine:
                 df['gold_atr_normalized'] = current_atr_percent / (expected_range / df['close'].iloc[-1] * 100)
             except:
                 df['gold_atr_normalized'] = 1
+        
+        # ==========================================
+        # ADVANCED STATISTICAL FEATURES (INSTITUTIONAL)
+        # ==========================================
+        try:
+            # 1. Shannon Entropy (Rolling Chaos Meter)
+            # Window 50 bars (approx 4 hours on M5)
+            df['entropy'] = df['returns'].rolling(window=50).apply(self._calculate_shannon_entropy)
+            
+            # 2. Hurst Exponent (Trend Persistence)
+            # Window 100 bars (approx 8 hours on M5)
+            df['hurst'] = df['close'].rolling(window=100).apply(self._calculate_hurst)
+            
+            # 3. GARCH Volatility Forecast (Predictive Risk)
+            # We calculate this on a rolling window to simulate real-time forecasting
+            # Note: GARCH is heavy, so we might optimize to only do it on the last candle in live mode
+            # For backfilled dataframe, we'll use a simplified rolling approach or just realized vol
+            if len(df) > 100:
+                # Calculate only for the last candle to save time during live usage
+                returns_subset = df['returns'].iloc[-500:] # Last 500 bars for fitting
+                forecast_vol = self._calculate_garch_volatility(returns_subset.dropna())
+                df['garch_vol'] = 0.0
+                df.iloc[-1, df.columns.get_loc('garch_vol')] = forecast_vol
+            else:
+                 df['garch_vol'] = df['volatility'] # Fallback
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Stat Feature Error: {e}", "WARNING", "FEATURE_ENGINE")
+            df['entropy'] = 0
+            df['hurst'] = 0.5
+            df['garch_vol'] = 0
         
         # Final cleanup
         all_features = self.get_feature_columns()
@@ -2037,6 +2126,15 @@ class SignalQualityFilter:
             return False, f"Volatile regime requires higher confidence: {confidence:.2%} < 0.65"
         
         validation_results.append(f"✓ Regime OK: {regime}")
+        
+        # ==========================================
+        # 9b. NEWS & SPREAD FILTER (Proxy)
+        # ==========================================
+        current_spread = features.get('spread', 0)
+        if hasattr(Config, 'NEWS_FILTER_ENABLED') and Config.NEWS_FILTER_ENABLED:
+            if current_spread > Config.MAX_SPREAD_PIPS:
+                 return False, f"High Spread ({current_spread} pips) - Possible News/Event"
+            validation_results.append(f"✓ Spread OK: {current_spread}")
         
         # ==========================================
         # 10. MULTI-TIMEFRAME ALIGNMENT
@@ -2597,14 +2695,30 @@ class EnhancedEnsemble:
     
     def _detect_current_regime(self, features):
         """Detect current market regime from features"""
-        hurst = features.get('hurst_exponent', 0.5)
-        volatility = features.get('volatility', 0)
+        # Advanced Regime Classification (State Machine)
+        entropy = features.get('entropy', 0)
+        hurst = features.get('hurst', 0.5)
+        garch_vol = features.get('garch_vol', 0)
         adx = features.get('adx', 20)
         
-        if hurst > 0.6 and adx > 25:
+        # State 1: CHAOS (Do Not Touch)
+        # High Entropy (Noise) + High Volatility = Dangerous
+        if entropy > 0.8 and garch_vol > Config.HIGH_VOL_THRESHOLD:
+            return 'volatile' # Hard Defense
+            
+        # State 2: FLOW (Trend)
+        # Low Entropy (Organized) + High Hurst (Trending)
+        if entropy < 0.6 and hurst > 0.55:
             return 'trending'
-        elif hurst < 0.4 and adx < 20:
+            
+        # State 3: CHOP (Mean Reversion)
+        # High Entropy (Disorganized) + Low Hurst (Reverting)
+        if entropy > 0.7 and hurst < 0.45:
             return 'mean_reverting'
+            
+        # Fallback to ADX/Vol logic if signals are mixed
+        if adx > 25:
+            return 'trending'
         elif volatility > Config.HIGH_VOL_THRESHOLD:
             return 'volatile'
         else:
@@ -2844,6 +2958,26 @@ class EnhancedExitManager:
                 profit_points = entry_price - close_price
                 distance_to_sl = current_sl - close_price
 
+            initial_risk = abs(entry_price - current_sl)
+            if initial_risk == 0: initial_risk = atr
+            r_multiple = profit_points / initial_risk
+
+            # 1. STALE TRADE EXIT (Time Decay)
+            # If held > 60 mins and profit < 0.5R, exit to free up capital
+            STALE_THRESHOLD_MINS = 60
+            MIN_PROFIT_R = 0.5
+            
+            time_held_mins = (int(time.time()) - trade['open_time']) / 60
+            
+            if time_held_mins > STALE_THRESHOLD_MINS and r_multiple < MIN_PROFIT_R:
+                 # Ensure we are not negative (give it a bit more room if losing slightly, but close if dead flat)
+                 # If losing more than -0.5R, maybe let SL hit or wait. But if hovering near 0, KILL IT.
+                 if r_multiple > -0.5: 
+                    ProfessionalLogger.log(f"💤 Stale Trade Exit (#{ticket}): Held {time_held_mins:.0f}m, Profit {r_multiple:.2f}R - Closing", "EXIT", "MANAGER")
+                    if self.executor.close_position(ticket, symbol):
+                        active_positions.pop(ticket, None)
+                    continue
+
             # High Water Mark (HWM) Tracking for Profit Protection
             trade['pnl'] = profit_points # Update current PnL
             if profit_points > 0:
@@ -2876,18 +3010,38 @@ class EnhancedExitManager:
                         sl_changed = True
                         ProfessionalLogger.log(f"🛡️ Locked Breakeven for #{ticket} (1R reached)", "RISK", "MANAGER")
 
-            # TIGHT TRAILING AT 2R+
-            if r_multiple > 2.0:
+            # RATCHET TRAILING STOP (INSTITUTIONAL GRADE)
+            # As we get deeper in money, we trail TIGHTER to lock it in.
+            
+            # Tier 1: 1.5R Profit -> Trail at 1.0 ATR distance
+            if r_multiple > 1.5:
+                trail_dist = atr * 1.0
                 if trade_type == 'BUY':
-                    trail_price = close_price - (atr * 1.0)
+                    trail_price = close_price - trail_dist
                     if trail_price > new_sl:
                         new_sl = trail_price
                         sl_changed = True
                 else:
-                    trail_price = close_price + (atr * 1.0)
+                    trail_price = close_price + trail_dist
                     if trail_price < new_sl:
                         new_sl = trail_price
                         sl_changed = True
+
+            # Tier 2: 3.0R Profit -> Trail at 0.5 ATR distance (Sniper Lock)
+            if r_multiple > 3.0:
+                trail_dist = atr * 0.5
+                if trade_type == 'BUY':
+                    trail_price = close_price - trail_dist
+                    if trail_price > new_sl:
+                        new_sl = trail_price
+                        sl_changed = True
+                        ProfessionalLogger.log(f"🔒 Ratchet Tightened (3R+): Stop moved to {new_sl:.2f}", "RISK", "MANAGER")
+                else:
+                    trail_price = close_price + trail_dist
+                    if trail_price < new_sl:
+                        new_sl = trail_price
+                        sl_changed = True
+                        ProfessionalLogger.log(f"🔒 Ratchet Tightened (3R+): Stop moved to {new_sl:.2f}", "RISK", "MANAGER")
 
             # TECHNICAL EXHAUSTION
             is_exhausted = False
@@ -3653,7 +3807,37 @@ class MultiTimeframeAnalyser:
         features['ema_fast'] = df['close'].ewm(span=8).mean().iloc[-1]
         features['ema_slow'] = df['close'].ewm(span=21).mean().iloc[-1]
         features['trend_direction'] = 1 if features['ema_fast'] > features['ema_slow'] else -1
-        features['trend_strength'] = abs(features['ema_fast'] - features['ema_slow']) / features['close']
+        
+        # Calculate ADX for trend strength
+        try:
+            high = df['high']
+            low = df['low'] 
+            close = df['close']
+            
+            # TR
+            tr1 = high - low
+            tr2 = abs(high - close.shift(1))
+            tr3 = abs(low - close.shift(1))
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(14).mean()
+            
+            # DM
+            up_move = high.diff()
+            down_move = -low.diff()
+            
+            plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+            minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+            
+            plus_di = 100 * (pd.Series(plus_dm).rolling(14).mean() / atr)
+            minus_di = 100 * (pd.Series(minus_dm).rolling(14).mean() / atr)
+            
+            dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+            adx = dx.rolling(14).mean().iloc[-1]
+            
+            features['adx'] = adx
+            features['trend_strength'] = 2 if adx > 40 else 1 if adx > 25 else 0
+        except:
+            features['trend_strength'] = 0
         
         features['rsi'] = self._calculate_rsi(df['close'], period=14)
         features['momentum'] = df['close'].iloc[-1] / df['close'].iloc[-10] - 1 if len(df) >= 10 else 0
@@ -3697,6 +3881,48 @@ class MultiTimeframeAnalyser:
         signals = []
         weights = []
         
+        # Calculate Market 'Speed' (Volatility/Trend Strength) for Dynamic Weighting
+        # We use M5 as the baseline for market speed
+        market_speed_metrics = multi_tf_data.get('M5', None)
+        is_fast_market = False
+        is_slow_market = False
+        
+        if market_speed_metrics is not None and len(market_speed_metrics) > 20:
+            # Calculate ADX proxy or use ATR
+            try:
+                 # Quick ADX approx
+                high = market_speed_metrics['high']
+                low = market_speed_metrics['low']
+                close = market_speed_metrics['close']
+                tr = pd.concat([high - low, abs(high - close.shift(1)), abs(low - close.shift(1))], axis=1).max(axis=1)
+                atr = tr.rolling(14).mean().iloc[-1]
+                atr_percent = atr / close.iloc[-1]
+                
+                # Fast market = High ATR (> 0.1%) or Strong trend
+                if atr_percent > 0.0010: # 10 pips on gold approx
+                    is_fast_market = True
+                elif atr_percent < 0.0005: 
+                    is_slow_market = True
+            except:
+                pass
+
+        # Define Dynamic Weights
+        # Order: M1, M5, M15, M30 (Assumes TIMEFRAMES list order)
+        if is_fast_market:
+            # Fast market: Prioritize M1/M5 for speed
+            current_weights = [0.40, 0.40, 0.15, 0.05]
+            regime_note = "FAST (High Vol)"
+        elif is_slow_market:
+            # Slow market: Prioritize M15/M30 for stability
+            current_weights = [0.05, 0.15, 0.40, 0.40]
+            regime_note = "SLOW (Low Vol)"
+        else:
+            # Normal market: Balanced
+            current_weights = [0.15, 0.35, 0.30, 0.20]
+            regime_note = "NORMAL"
+
+        ProfessionalLogger.log(f"Dynamic TF Weights: {regime_note} | Weights: {current_weights}", "INFO", "MULTI_TF")
+        
         for tf_name, df in multi_tf_data.items():
             if df is None or len(df) < 20:
                 continue
@@ -3704,10 +3930,14 @@ class MultiTimeframeAnalyser:
             features = self.calculate_timeframe_features(df)
             signal = self._generate_timeframe_signal(features, tf_name)
             
+            # Use dynamic weight
+            tf_index = self.config.TIMEFRAMES.index(tf_name) if tf_name in self.config.TIMEFRAMES else -1
+            weight = current_weights[tf_index] if tf_index != -1 else 0.2
+            
             analysis['timeframes'][tf_name] = {
                 'signal': signal,
                 'features': features,
-                'weight': self.config.TIMEFRAME_WEIGHTS[self.config.TIMEFRAMES.index(tf_name)] if tf_name in self.config.TIMEFRAMES else 0.2
+                'weight': weight
             }
             
             signals.append(signal)
@@ -3796,7 +4026,10 @@ class MultiTimeframeAnalyser:
         return analysis
     
     def _generate_timeframe_signal(self, features, timeframe_name):
-        """Generate trading signal for a single timeframe"""
+        """
+        Generate trading signal for a single timeframe using TREND DOMINANCE LOGIC.
+        Prioritizes trend following in strong regimes to prevent catching falling knives.
+        """
         if not features:
             return 0.5
         
@@ -3809,53 +4042,86 @@ class MultiTimeframeAnalyser:
         
         signal_score = 0
         
-        price_pos = features.get('price_position', 0.5)
-        if price_pos < 0.3:
-            signal_score += 1
-        elif price_pos > 0.7:
-            signal_score -= 1
-        
+        # 1. TREND COMPONENT (DOMINANT)
         trend = features.get('trend_direction', 0)
-        signal_score += trend
+        trend_strength = features.get('trend_strength', 0)
+        is_strong_trend = trend_strength >= 2
         
-        # Dynamic RSI thresholds: More sensitive for M1/M5
+        # Double weight for strong trends
+        trend_weight = 2.0 if is_strong_trend else 1.0
+        signal_score += (trend * trend_weight)
+        
+        # 2. PRICE POSITION (MEAN REVERSION)
+        price_pos = features.get('price_position', 0.5)
+        price_score = 0
+        
+        if price_pos < 0.3: # "Cheap" -> Buy
+            # VETO: Don't buy in strong downtrend
+            if is_strong_trend and trend == -1:
+                price_score = 0
+            else:
+                price_score = 1
+        elif price_pos > 0.7: # "Expensive" -> Sell
+            # VETO: Don't sell in strong uptrend
+            if is_strong_trend and trend == 1:
+                price_score = 0
+            else:
+                price_score = -1
+        
+        signal_score += price_score
+        
+        # 3. RSI (MEAN REVERSION)
         rsi = features.get('rsi', 50)
-        rsi_lower = 40 if timeframe_name in ['M1', 'M5'] else 30
-        rsi_upper = 60 if timeframe_name in ['M1', 'M5'] else 70
+        # Use standardized thresholds
+        rsi_lower = 30
+        rsi_upper = 70
         
-        if rsi < rsi_lower:
-            signal_score += 1
-        elif rsi > rsi_upper:
-            signal_score -= 1
+        rsi_score = 0
+        if rsi < rsi_lower: # Oversold -> Buy
+            # VETO: Don't buy oversold in strong downtrend
+            if is_strong_trend and trend == -1:
+                rsi_score = 0
+            else:
+                rsi_score = 1
+        elif rsi > rsi_upper: # Overbought -> Sell
+            # VETO: Don't sell overbought in strong uptrend
+            if is_strong_trend and trend == 1:
+                rsi_score = 0
+            else:
+                rsi_score = -1
+                
+        signal_score += rsi_score
         
+        # 4. MOMENTUM
         momentum = features.get('momentum', 0)
         mom_threshold = 0.002 if timeframe_name in ['M1', 'M5'] else 0.005
-        signal_score += 1 if momentum > mom_threshold else -1 if momentum < -mom_threshold else 0
         
-        # Apply Asian session adjustments if in Asian session
+        mom_score = 1 if momentum > mom_threshold else -1 if momentum < -mom_threshold else 0
+        signal_score += mom_score
+        
+        # Apply Asian session adjustments (Simplified)
         hour = datetime.now().hour
-        if 0 <= hour < 9:  # Asian session
-            adjustments = mtf_params.get('ASIAN_SESSION_ADJUSTMENTS', {})
-            # Adjust weights of different components
-            if adjustments:
-                signal_score = (
-                    (trend * adjustments.get('trend_direction_weight', 1.0)) +
-                    ((1 if rsi < 30 else -1 if rsi > 70 else 0) * adjustments.get('rsi_weight', 1.0)) +
-                    ((1 if momentum > 0.005 else -1 if momentum < -0.005 else 0) * adjustments.get('volatility_weight', 1.0))
-                )
+        if 0 <= hour < 9:
+            # During Asian session, rely more on Mean Reversion (RSI) than Trend
+            # Only if trend is NOT strong
+            if not is_strong_trend:
+                signal_score = (trend * 0.5) + (price_score * 1.5) + (rsi_score * 1.5) + mom_score
         
         # Apply timeframe multiplier
         signal_score *= timeframe_multiplier
         
-        # Log indicator contributions if not neutral (Internal breakdown)
+        # Log breakdown
         if signal_score != 0:
             ProfessionalLogger.log(
                 f"TF {timeframe_name} Breakdown | Score: {signal_score:.2f} | "
-                f"Trend: {trend} | RSI: {rsi:.0f} | Mom: {momentum:.4f}",
+                f"Trend: {trend} (Str:{trend_strength}) | RSI: {rsi:.0f} | PricePos: {price_pos:.2f}",
                 "ANALYSIS", "MULTI_TF"
             )
         
-        # Normalize score and apply thresholds (Relaxed to 0.24 so one indicator triggers)
+        # Normalize score
+        # Max score (Strong Trend): 2 (Trend) + 0 (Price) + 0 (RSI) + 1 (Mom) = 3
+        # Max score (Normal): 1 + 1 + 1 + 1 = 4
+        # We divide by 4 to be conservative
         normalized_score = max(-1, min(1, signal_score / 4))
         
         if normalized_score > 0.24:
@@ -4269,6 +4535,46 @@ class EnhancedTradingEngine:
                             }
                             trade_data.update(outcome)
                             
+                            # Final Outcome Logging
+                            ProfessionalLogger.log(
+                                f"Trade #{ticket} Closed | Profit: ${deal.profit:.2f} | "
+                                f"Entry: {trade_data['open_price']:.2f}, Exit: {deal.price:.2f}",
+                                "TRADE", "ENGINE"
+                            )
+                            
+                            # Save to memory
+                            trade_record = {
+                                'ticket': ticket,
+                                'symbol': Config.SYMBOL,
+                                'open_time': trade_data['open_time'],
+                                'close_time': int(deal.time),
+                                'type': trade_data['type'],
+                                'volume': trade_data['volume'],
+                                'open_price': trade_data['open_price'],
+                                'close_price': deal.price,
+                                'sl': trade_data.get('sl', 0.0),
+                                'tp': trade_data.get('tp', 0.0),
+                                'profit': deal.profit,
+                                'features': trade_data.get('features', {}),
+                                'model_prediction': trade_data.get('model_prediction', {}),
+                                'regime': self.last_regime
+                            }
+                            self.trade_memory.add_trade(trade_record)
+                            
+                            # EQUITY CURVE GUARDIAN (INSTITUTIONAL)
+                            # Check if strategy is decaying
+                            recent_equity_curve = self.trade_memory.trades[-20:] # Last 20 trades
+                            if len(recent_equity_curve) >= 10:
+                                total_pnl_history = [t['profit'] for t in recent_equity_curve]
+                                
+                                # Calculate moving average of PnL
+                                ma_pnl = sum(total_pnl_history) / len(total_pnl_history)
+                                
+                                # If average PnL is significantly negative over last 10-20 trades, PAUSE.
+                                if ma_pnl < -100: # Decaying strategy (e.g., losing $100 per trade on avg)
+                                     ProfessionalLogger.log(f"📉 EQUITY CURVE WARNING: Avg Loss ${abs(ma_pnl):.2f}/trade over last {len(recent_equity_curve)} trades.", "CRITICAL", "RISK")
+                                     # self.running = False
+                            
                             self.trade_memory.add_trade(trade_data)
                             self.returns_series.append(returns)
                             
@@ -4653,6 +4959,32 @@ class EnhancedTradingEngine:
         # Calculate base volume using risk percentage
         risk_amount = account.equity * Config.RISK_PERCENT
         
+        # ==========================================
+        # KELLY CRITERION SIZING
+        # ==========================================
+        kelly_risk_pct = 0
+        if hasattr(Config, 'USE_KELLY_CRITERION') and Config.USE_KELLY_CRITERION:
+            # Get stats from memory
+            stats = self.trade_memory.get_statistical_summary()
+            win_rate = stats.get('win_rate', 0.5) # Default to 0.5 if no history
+            avg_win = stats.get('avg_win', 100)
+            avg_loss = abs(stats.get('avg_loss', -100))
+            
+            if avg_loss > 0 and win_rate > 0:
+                win_loss_ratio = avg_win / avg_loss
+                # Kelly Formula: W - (1-W)/R
+                kelly_pct = win_rate - (1 - win_rate) / win_loss_ratio
+                
+                if kelly_pct > 0:
+                    # Apply Fractional Kelly
+                    kelly_risk_pct = kelly_pct * Config.KELLY_FRACTION
+                    # Cap at Maximum Safe Limit
+                    kelly_risk_pct = min(kelly_risk_pct, Config.MAX_KELLY_RISK)
+                    
+                    # Override base risk if Kelly suggests a valid positive size
+                    risk_amount = account.equity * kelly_risk_pct
+                    ProfessionalLogger.log(f"Kelly Criterion: Calculated {kelly_pct:.2%} -> Used {kelly_risk_pct:.2%} Risk", "RISK", "ENGINE")
+
         # Calculate stop loss distance
         if Config.USE_DYNAMIC_SL_TP:
             atr_absolute = atr * entry_price
@@ -4662,10 +4994,12 @@ class EnhancedTradingEngine:
         
         # Calculate volume based on risk
         point_value = symbol_info.trade_contract_size * symbol_info.trade_tick_size / symbol_info.trade_tick_value
+        if point_value == 0: point_value = 1.0 # Safety
+        
         volume_raw = risk_amount / (sl_distance * point_value)
         
         # Apply volatility scaling if enabled
-        if Config.VOLATILITY_SCALING_ENABLED:
+        if hasattr(Config, 'VOLATILITY_SCALING_ENABLED') and Config.VOLATILITY_SCALING_ENABLED:
             volatility = features.get('volatility', 0)
             if volatility > Config.HIGH_VOL_THRESHOLD:
                 volume_raw *= Config.HIGH_VOL_SIZE_MULTIPLIER
@@ -4874,6 +5208,55 @@ class EnhancedTradingEngine:
         
         return max(10, min(base_sleep, 120)) # Ensure sleep is between 10s and 2min
 
+    def _get_dxy_trend(self):
+        """
+        Identify US Dollar Index (DXY) Trend.
+        Tries symbols: DXY, USDX, DX, USDIndex
+        Returns: 1 (Uptrend), -1 (Downtrend), 0 (Neutral)
+        """
+        dxy_symbols = ["DXY", "USDX", "DX", "USDIndex", "USDOLLAR"]
+        dxy_symbol = None
+        
+        # Cache symbol check
+        if hasattr(self, 'cached_dxy_symbol'):
+            dxy_symbol = self.cached_dxy_symbol
+        else:
+            for sym in dxy_symbols:
+                if mt5.symbol_info(sym):
+                    dxy_symbol = sym
+                    self.cached_dxy_symbol = sym
+                    ProfessionalLogger.log(f"Found DXY Symbol: {sym}", "INFO", "ENGINE")
+                    break
+        
+        if not dxy_symbol:
+            return 0
+            
+        # Fetch Data (H1 for macro trend)
+        rates = mt5.copy_rates_from_pos(dxy_symbol, mt5.TIMEFRAME_H1, 0, 50)
+        if rates is None or len(rates) < 20:
+            return 0
+            
+        df = pd.DataFrame(rates)
+        
+        # Calculate Trend (EMA 8 vs 21)
+        ema_fast = df['close'].ewm(span=8).mean().iloc[-1]
+        ema_slow = df['close'].ewm(span=21).mean().iloc[-1]
+        
+        # Calculate RSI
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        rs = gain / loss.replace(0, 1)
+        rsi = (100 - (100 / (1 + rs))).iloc[-1]
+        
+        # Determine Trend
+        if ema_fast > ema_slow and rsi > 50:
+            return 1 # Dollar Strong
+        elif ema_fast < ema_slow and rsi < 50:
+            return -1 # Dollar Weak
+            
+        return 0
+
     def run(self):
         """Main execution method"""
         print("\n" + "=" * 70)
@@ -4912,6 +5295,32 @@ class EnhancedTradingEngine:
                     time.sleep(10) # Blocking sleep here is acceptable as we can't proceed without data
                     continue
                 
+                # ==========================================
+                # DAILY LOSS LIMIT CHECK (PROFESSIONAL RISK)
+                # ==========================================
+                account_info = mt5.account_info()
+                if account_info:
+                    current_equity = account_info.equity
+                    # Use stored starting equity or initialize it
+                    if not hasattr(self, 'daily_start_equity') or self.daily_start_equity == 0:
+                        self.daily_start_equity = current_equity
+                        ProfessionalLogger.log(f"Daily Start Equity set to: ${self.daily_start_equity:.2f}", "RISK", "ENGINE")
+                    
+                    # Calculate daily PnL percent
+                    daily_pnl = current_equity - self.daily_start_equity
+                    daily_pnl_percent = (daily_pnl / self.daily_start_equity) * 100
+                    
+                    if daily_pnl_percent < -Config.MAX_DAILY_LOSS_PERCENT:
+                        ProfessionalLogger.log(f"🛑 DAILY LOSS LIMIT HIT: {daily_pnl_percent:.2f}% < -{Config.MAX_DAILY_LOSS_PERCENT}%", "CRITICAL", "RISK")
+                        ProfessionalLogger.log("CLOSING ALL POSITIONS AND STOPPING FOR THE DAY", "CRITICAL", "RISK")
+                        
+                        # Close all positions
+                        for ticket in list(self.active_positions.keys()):
+                            self.executor.close_position(ticket, Config.SYMBOL)
+                        
+                        self.running = False
+                        break
+                        
                 df_current = pd.DataFrame(rates)
                 
                 # ==========================================
@@ -5066,6 +5475,15 @@ class EnhancedTradingEngine:
                         agreement = predictions.count(signal) / len(predictions)
                 
                 # Multi-TF validation
+                market_context = {
+                    'regime': self.last_regime,
+                    'is_asian_session': 0 <= datetime.now().hour < 9,
+                    'multi_tf_signal': multi_tf_signal,
+                    'spread_ok': True, # Already checked in main loop? check ticket.
+                    'news_event': False, # Placeholder
+                    'dxy_trend': self._get_dxy_trend() # Inject DXY Status
+                }
+                
                 if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
                     if multi_tf_signal != 0.5:
                         signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
