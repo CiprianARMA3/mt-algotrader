@@ -179,7 +179,7 @@ class Config:
     ATR_TP_MULTIPLIER = 1.75
     
     # Minimum Risk/Reward
-    MIN_RR_RATIO = 1.25
+    MIN_RR_RATIO = 1.20
     
     # Fixed Stops
     FIXED_SL_PERCENT = 0.0035
@@ -2808,11 +2808,13 @@ class EnhancedExitManager:
             model_flip = False
             if trade_type == 'BUY' and signal == 0 and confidence > 0.65:
                 ProfessionalLogger.log(f"📉 Model flipped to BEARISH (Conf: {confidence:.2f}) - Exiting BUY #{ticket}", "EXIT", "MANAGER")
-                self.executor.close_position(ticket, symbol)
+                if self.executor.close_position(ticket, symbol):
+                    active_positions.pop(ticket, None)
                 continue
             elif trade_type == 'SELL' and signal == 1 and confidence > 0.65:
                 ProfessionalLogger.log(f"📈 Model flipped to BULLISH (Conf: {confidence:.2f}) - Exiting SELL #{ticket}", "EXIT", "MANAGER")
-                self.executor.close_position(ticket, symbol)
+                if self.executor.close_position(ticket, symbol):
+                    active_positions.pop(ticket, None)
                 continue
 
             # Calculate R-multiple
@@ -2884,20 +2886,23 @@ class EnhancedExitManager:
             # TREND DEATH (ADX DROP)
             if profit_points > 0 and adx < 20 and prev['adx'] > 20:
                 ProfessionalLogger.log(f"💤 Trend Dying (ADX < 20) - Closing #{ticket} to free capital", "EXIT", "MANAGER")
-                self.executor.close_position(ticket, symbol)
+                if self.executor.close_position(ticket, symbol):
+                    active_positions.pop(ticket, None)
                 continue
 
             # MOMENTUM EXHAUSTION DETECTION
             if self._detect_momentum_exhaustion(df, trade):
                 ProfessionalLogger.log(f"🔻 Momentum exhaustion detected - Exiting #{ticket}", "EXIT", "MANAGER")
-                self.executor.close_position(ticket, symbol)
+                if self.executor.close_position(ticket, symbol):
+                    active_positions.pop(ticket, None)
                 continue
             
             # TIME-BASED EXIT (stagnant positions)
             bars_held = self._calculate_bars_held(trade)
             if bars_held > 50 and r_multiple < 0.5:
                 ProfessionalLogger.log(f"⏰ Time stop: Position #{ticket} stagnant for {bars_held} bars", "EXIT", "MANAGER")
-                self.executor.close_position(ticket, symbol)
+                if self.executor.close_position(ticket, symbol):
+                    active_positions.pop(ticket, None)
                 continue
 
             # PARTIAL EXIT LOGIC (scale out)
@@ -2913,18 +2918,26 @@ class EnhancedExitManager:
         """Detect when trend momentum is fading"""
         latest = df.iloc[-1]
         
+        # Divergence check (only if in profit)
         if trade['type'] == 'BUY':
             price_higher = df['close'].iloc[-1] > df['close'].iloc[-5]
             rsi_lower = latest['rsi'] < df['rsi'].iloc[-5]
-            if price_higher and rsi_lower:
+            if price_higher and rsi_lower and latest['rsi'] > 65:
+                return True
+        else: # SELL
+            price_lower = df['close'].iloc[-1] < df['close'].iloc[-5]
+            rsi_higher = latest['rsi'] > df['rsi'].iloc[-5]
+            if price_lower and rsi_higher and latest['rsi'] < 35:
                 return True
         
-        if latest['volume_ratio'] < 0.6:
+        # Extreme volume drop (less aggressive than before)
+        if latest['volume_ratio'] < 0.3:
             return True
         
+        # ADX Slope death
         if hasattr(df, 'adx'):
             adx_slope = latest['adx'] - df['adx'].iloc[-3]
-            if adx_slope < -5:
+            if adx_slope < -8: # More strict than -5
                 return True
         
         return False
@@ -4523,6 +4536,22 @@ class EnhancedTradingEngine:
             f"RR: {rr_ratio:.2f}",
             "INFO", "ENGINE"
         )
+        
+        # ==========================================
+        # SIGNAL FLIP: Close opposite positions first
+        # ==========================================
+        opposite_type = "SELL" if trade_type_str == "BUY" else "BUY"
+        opposite_tickets = [t for t, d in self.active_positions.items() if d.get('type') == opposite_type]
+        
+        if opposite_tickets:
+            ProfessionalLogger.log(
+                f"🔄 Signal Flip: Closing {len(opposite_tickets)} opposite {opposite_type} positions "
+                f"before opening new {trade_type_str}", 
+                "INFO", "ENGINE"
+            )
+            for ticket in opposite_tickets:
+                if self.order_executor.close_position(ticket, Config.SYMBOL):
+                    self.active_positions.pop(ticket, None)
         
         # ==========================================
         # EXECUTE THE TRADE
