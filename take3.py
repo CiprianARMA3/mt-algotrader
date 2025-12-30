@@ -334,8 +334,8 @@ class Config:
     BACKTEST_RESULTS_FILE = os.path.join(CACHE_DIR, "backtest_results_xauusd.json")
     PERFORMANCE_LOG_FILE = os.path.join(CACHE_DIR, "performance_log_xauusd.csv")
     
-    MEMORY_SIZE = 1000
-    LEARNING_WEIGHT = 0.4
+    MEMORY_SIZE = 10000 #ex 1000
+    LEARNING_WEIGHT = 0.5 #ex 0.5
     
     # Logging Levels
     LOG_LEVEL_CONSOLE = "INFO"
