@@ -68,7 +68,7 @@ class Config:
     MAX_RISK_PER_TRADE = 100
     
     # Signal Quality - Dynamic thresholds
-    MIN_CONFIDENCE = 0.55
+    MIN_CONFIDENCE = 0.45
     MIN_ENSEMBLE_AGREEMENT = 0.50
     
     # Position Limits
@@ -119,7 +119,7 @@ class Config:
     USE_DYNAMIC_BARRIERS = True  # New: Dynamic ATR-based barriers
     BARRIER_UPPER = 0.0020
     BARRIER_LOWER = -0.0015
-    BARRIER_TIME = 12                # Increased from 6 to give price more room
+    BARRIER_TIME = 12                # Shortened to 1 hour (12 bars on M5) for day trading
     
     # Ensemble Configuration - ENHANCED
     USE_STACKING_ENSEMBLE = True
@@ -335,10 +335,10 @@ class Config:
     # MULTI-TIMEFRAME ANALYSIS
     # ==========================================
     MULTI_TIMEFRAME_ENABLED = True
-    TIMEFRAMES = ['M5', 'M15', 'H1']
-    TIMEFRAME_WEIGHTS = [0.2, 0.5, 0.3]
-    TIMEFRAME_ALIGNMENT_THRESHOLD = 0.33
-    REQUIRE_TIMEFRAME_ALIGNMENT = False  # Set to False to take trades even with low alignment
+    TIMEFRAMES = ['M1', 'M5', 'M15', 'M30']
+    TIMEFRAME_WEIGHTS = [0.15, 0.35, 0.30, 0.20]
+    TIMEFRAME_ALIGNMENT_THRESHOLD = 0.30
+    REQUIRE_TIMEFRAME_ALIGNMENT = False
     
     LONG_TIMEFRAME_TREND_FILTER = True
     SHORT_TIMEFRAME_ENTRY = True
@@ -405,9 +405,10 @@ class Config:
         'SELL_SIGNAL_THRESHOLD': -0.35,
         
         # Timeframe signal multipliers
-        'M5_SIGNAL_MULTIPLIER': 0.8,
-        'M15_SIGNAL_MULTIPLIER': 1.0,
-        'H1_SIGNAL_MULTIPLIER': 1.2,
+        'M1_SIGNAL_MULTIPLIER': 0.7,
+        'M5_SIGNAL_MULTIPLIER': 0.9,
+        'M15_SIGNAL_MULTIPLIER': 1.1,
+        'M30_SIGNAL_MULTIPLIER': 1.3,
         
         # Feature weight adjustments for Asian session
         'ASIAN_SESSION_ADJUSTMENTS': {
@@ -1748,9 +1749,9 @@ class EnhancedFeatureEngine:
         # Calculate dynamic barriers based on rolling ATR
         atr_percent = df['atr_percent'].rolling(20).mean().fillna(0.001)
         
-        # Dynamic barriers: 1.8x ATR for profit, 1.2x ATR for stop (More reachable)
-        upper_barriers = atr_percent * 1.8
-        lower_barriers = -atr_percent * 1.2
+        # Dynamic barriers: 1.5x ATR for profit, 1.0x ATR for stop (Intraday scale)
+        upper_barriers = atr_percent * 1.5
+        lower_barriers = -atr_percent * 1.0
         
         labels = np.zeros(len(df))
         barrier_time = Config.BARRIER_TIME
@@ -3541,9 +3542,10 @@ class MultiTimeframeAnalyser:
         self.config = Config
         
         self.timeframe_map = {
+            'M1': mt5.TIMEFRAME_M1,
             'M5': mt5.TIMEFRAME_M5,
             'M15': mt5.TIMEFRAME_M15,
-            'H1': mt5.TIMEFRAME_H1
+            'M30': mt5.TIMEFRAME_M30
         }
         
         self.analysis_cache = {}
@@ -3673,12 +3675,12 @@ class MultiTimeframeAnalyser:
             total_pairs = len(signal_directions) * (len(signal_directions) - 1) / 2
             analysis['alignment_score'] = agreement / total_pairs if total_pairs > 0 else 0
         
-        if 'H1' in analysis['timeframes']:
-            h1_trend = analysis['timeframes']['H1']['features']['trend_direction']
+        if 'M30' in analysis['timeframes']:
+            m30_trend = analysis['timeframes']['M30']['features']['trend_direction']
             if self.config.LONG_TIMEFRAME_TREND_FILTER:
-                if analysis['consensus_signal'] == 1 and h1_trend < 0:
+                if analysis['consensus_signal'] == 1 and m30_trend < 0:
                     analysis['trend_filter'] = -1
-                elif analysis['consensus_signal'] == 0 and h1_trend > 0:
+                elif analysis['consensus_signal'] == 0 and m30_trend > 0:
                     analysis['trend_filter'] = -1
                 else:
                     analysis['trend_filter'] = 1
