@@ -1183,7 +1183,11 @@ class EnhancedFeatureEngine:
             # 3. Volume z-score (statistical significance)
             df['volume_zscore'] = (df['tick_volume'] - df['volume_sma']) / df['volume_std']
             
-            # 4. Volume trends (momentum)
+            # 4. Stabilized volume metrics (using previous completed bar)
+            df['volume_ratio_prev'] = df['volume_ratio'].shift(1)
+            df['volume_zscore_prev'] = df['volume_zscore'].shift(1)
+            
+            # 5. Volume trends (momentum)
             df['volume_trend_5'] = df['tick_volume'].rolling(5).mean() / df['tick_volume'].rolling(20).mean()
             df['volume_trend_10'] = df['tick_volume'].rolling(10).mean() / df['tick_volume'].rolling(30).mean()
             
@@ -1746,7 +1750,7 @@ class EnhancedFeatureEngine:
             'returns_skew_20', 'returns_kurtosis_20',
             'distance_to_high_20', 'distance_to_low_20', 'high_low_range',
             'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'month_sin', 'month_cos',
-            'volume_ratio', 'volume_zscore', 'volume_price_correlation', 'volume_spike',
+            'volume_ratio', 'volume_ratio_prev', 'volume_zscore', 'volume_zscore_prev', 'volume_price_correlation', 'volume_spike',
             'garch_volatility', 'garch_vol_ratio',
             'hurst_exponent', 'regime_encoded',
             'var_95', 'cvar_95', 'var_cvar_spread',
@@ -1860,8 +1864,8 @@ class SignalQualityFilter:
         # ==========================================
         # 3. ADVANCED VOLUME VALIDATION (ENHANCED)
         # ==========================================
-        volume_ratio = features.get('volume_ratio', 1)
-        volume_zscore = features.get('volume_zscore', 0)
+        volume_ratio = features.get('volume_ratio_prev', features.get('volume_ratio', 1))
+        volume_zscore = features.get('volume_zscore_prev', features.get('volume_zscore', 0))
         
         # Get ATR-based context
         atr_percent = features.get('atr_percent', 0.001)
@@ -2230,7 +2234,9 @@ class SmartEntryTiming:
             pending['confirmations'] += 1
         
         # 2. Volume confirmation
-        volume_confirms = features.get('volume_ratio', 0) > 1.2
+        # Use previous bar for stability or current if it's already high
+        volume_ratio = max(features.get('volume_ratio_prev', 0), features.get('volume_ratio', 0))
+        volume_confirms = volume_ratio > 1.2
         if volume_confirms:
             pending['confirmations'] += 1
         
