@@ -68,7 +68,7 @@ class Config:
     MAX_RISK_PER_TRADE = 100
     
     # Signal Quality - Dynamic thresholds
-    MIN_CONFIDENCE = 0.45
+    MIN_CONFIDENCE = 0.425
     MIN_ENSEMBLE_AGREEMENT = 0.50
     
     # Position Limits
@@ -2107,9 +2107,9 @@ class SignalQualityFilter:
         
         validation_results.append(f"✓ Recent performance OK: win rate={win_rate:.0%}")
         
-        # Log successful validation
+        # Log successful validation with details
+        ProfessionalLogger.log(f"✅ Filter PASSED: {'BUY' if signal == 1 else 'SELL'} (Conf: {confidence:.1%})", "SUCCESS", "FILTER")
         if len(validation_results) > 0 and Config.DEBUG_MODE:
-            ProfessionalLogger.log("Signal validation details:", "DEBUG", "FILTER")
             for result in validation_results:
                 ProfessionalLogger.log(f"  {result}", "DEBUG", "FILTER")
         
@@ -2844,6 +2844,14 @@ class EnhancedExitManager:
                 profit_points = entry_price - close_price
                 distance_to_sl = current_sl - close_price
 
+            # High Water Mark (HWM) Tracking for Profit Protection
+            trade['pnl'] = profit_points # Update current PnL
+            if profit_points > 0:
+                current_hwm = trade.get('max_runge_profit', 0)
+                if profit_points > current_hwm:
+                    trade['max_runge_profit'] = profit_points
+
+
             initial_risk = abs(entry_price - current_sl)
             if initial_risk == 0: 
                 initial_risk = atr
@@ -2934,29 +2942,80 @@ class EnhancedExitManager:
                 trade['stop_loss'] = new_sl
     
     def _detect_momentum_exhaustion(self, df, trade):
-        """Detect when trend momentum is fading"""
-        latest = df.iloc[-1]
+        """Detect when trend momentum is fading with multiple confirmation methods"""
         
-        # Divergence check (only if in profit)
+        # 1. Robustness Check (Handle single tick/dict data)
+        if isinstance(df, dict):
+            # Cannot perform history-based checks on single tick
+            # If we need this, we should pass history separately or prevent calling with dict
+            return False
+            
+        if len(df) < 20: 
+            return False
+            
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # 2. Key Metrics
+        rsi = latest.get('rsi', 50)
+        prev_rsi = prev.get('rsi', 50)
+        
+        # 3. RSI Reversal (Crossing back from extremes)
+        # Faster than divergence - catches the immediate turn
         if trade['type'] == 'BUY':
-            price_higher = df['close'].iloc[-1] > df['close'].iloc[-5]
-            rsi_lower = latest['rsi'] < df['rsi'].iloc[-5]
-            if price_higher and rsi_lower and latest['rsi'] > 65:
+            # Was overbought (>70/75), now crossing back down
+            if prev_rsi > 70 and rsi < 70:
                 return True
         else: # SELL
-            price_lower = df['close'].iloc[-1] < df['close'].iloc[-5]
-            rsi_higher = latest['rsi'] > df['rsi'].iloc[-5]
-            if price_lower and rsi_higher and latest['rsi'] < 35:
+            # Was oversold (<30/25), now crossing back up
+            if prev_rsi < 30 and rsi > 30:
+                return True
+                
+        # 4. Profit Giveback Protection (High Water Mark)
+        # If we gave back > 30% of significant profit, exit
+        current_profit = trade.get('pnl', 0)
+        max_profit = trade.get('max_runge_profit', 0)
+        
+        if max_profit > 0: # We have been profitable
+            giveback_ratio = (max_profit - current_profit) / max_profit
+            # Only trigger if profit was "significant" (e.g., > 1 ATR approx)
+            atr = latest.get('atr', 0)
+            if max_profit > (atr * 0.5) and giveback_ratio > 0.35:
+                 return True
+
+        # 5. Price/Momentum Divergence (Recent Peak Logic)
+        if trade['type'] == 'BUY':
+            # Price recently made a high (in last 5 bars) but RSI is failing
+            recent_high = df['high'].iloc[-5:].max()
+            current_close = latest['close']
+            
+            # If we are slightly below recent high but RSI dropped significantly
+            price_near_high = current_close >= (recent_high * 0.999)
+            rsi_dropped = rsi < (df['rsi'].iloc[-5:].max() - 10)
+            
+            if price_near_high and rsi_dropped and rsi > 60:
+                return True
+                
+        else: # SELL
+            recent_low = df['low'].iloc[-5:].min()
+            current_close = latest['close']
+            
+            price_near_low = current_close <= (recent_low * 1.001)
+            rsi_rose = rsi > (df['rsi'].iloc[-5:].min() + 10)
+            
+            if price_near_low and rsi_rose and rsi < 40:
                 return True
         
-        # Extreme volume drop (less aggressive than before)
-        if latest['volume_ratio'] < 0.3:
+        # 6. Extreme Volume Drop
+        # Ensure volume_ratio exists, handle gracefully if not
+        vol_ratio = latest.get('volume_ratio', 1.0)
+        if vol_ratio < 0.2: # Very low volume indicates lack of interest
             return True
         
-        # ADX Slope death
-        if hasattr(df, 'adx'):
+        # 7. ADX Slope death
+        if 'adx' in df.columns:
             adx_slope = latest['adx'] - df['adx'].iloc[-3]
-            if adx_slope < -8: # More strict than -5
+            if adx_slope < -5: # ADX falling properly
                 return True
         
         return False
@@ -3759,14 +3818,19 @@ class MultiTimeframeAnalyser:
         trend = features.get('trend_direction', 0)
         signal_score += trend
         
+        # Dynamic RSI thresholds: More sensitive for M1/M5
         rsi = features.get('rsi', 50)
-        if rsi < 30:
+        rsi_lower = 40 if timeframe_name in ['M1', 'M5'] else 30
+        rsi_upper = 60 if timeframe_name in ['M1', 'M5'] else 70
+        
+        if rsi < rsi_lower:
             signal_score += 1
-        elif rsi > 70:
+        elif rsi > rsi_upper:
             signal_score -= 1
         
         momentum = features.get('momentum', 0)
-        signal_score += 1 if momentum > 0.005 else -1 if momentum < -0.005 else 0
+        mom_threshold = 0.002 if timeframe_name in ['M1', 'M5'] else 0.005
+        signal_score += 1 if momentum > mom_threshold else -1 if momentum < -mom_threshold else 0
         
         # Apply Asian session adjustments if in Asian session
         hour = datetime.now().hour
@@ -3783,11 +3847,20 @@ class MultiTimeframeAnalyser:
         # Apply timeframe multiplier
         signal_score *= timeframe_multiplier
         
+        # Log indicator contributions if not neutral (Internal breakdown)
+        if signal_score != 0:
+            ProfessionalLogger.log(
+                f"TF {timeframe_name} Breakdown | Score: {signal_score:.2f} | "
+                f"Trend: {trend} | RSI: {rsi:.0f} | Mom: {momentum:.4f}",
+                "ANALYSIS", "MULTI_TF"
+            )
+        
+        # Normalize score and apply thresholds (Relaxed to 0.24 so one indicator triggers)
         normalized_score = max(-1, min(1, signal_score / 4))
         
-        if normalized_score > 0.4:
+        if normalized_score > 0.24:
             return 1
-        elif normalized_score < -0.4:
+        elif normalized_score < -0.24:
             return 0
         else:
             return 0.5
@@ -4850,7 +4923,28 @@ class EnhancedTradingEngine:
                    (current_time - self.last_feature_time).total_seconds() > Config.FEATURE_RECALC_INTERVAL_SECONDS:
                     self.cached_features = self.feature_engine.calculate_features(df_current)
                     self.last_feature_time = current_time
+                    ProfessionalLogger.log(f"Refresh: Recalculated technical features for {Config.SYMBOL}", "DATA", "ENGINE")
                 features = self.cached_features
+                
+                # Heartbeat every 20 iterations (approx every 5 mins)
+                # Periodic Market Diagnostics (Every ~5 mins)
+                if self.iteration % 5 == 0:
+                    features = self.cached_features
+                    vol = features['volatility'].iloc[-1] if features is not None and 'volatility' in features else 0
+                    base_atr = features['atr'].iloc[-1] if features is not None and 'atr' in features else 0
+                    
+                    ProfessionalLogger.log(
+                        f"📊 MARKET DIAGNOSTIC | Iteration {self.iteration}", 
+                        "INFO", "ENGINE"
+                    )
+                    ProfessionalLogger.log(
+                        f"   Regime: {self.last_regime} | Volatility: {vol:.4f} | ATR: {base_atr:.5f}", 
+                        "DATA", "ENGINE"
+                    )
+                    
+                    if self.active_positions:
+                        total_pnl = sum([p.get('pnl', 0) for p in self.active_positions.values()])
+                        ProfessionalLogger.log(f"   Active Positions: {len(self.active_positions)} | Total Open PnL: ${total_pnl:.2f}", "TRADE", "ENGINE")
                 
                 # ==========================================
                 # MULTI-TIMEFRAME ANALYSIS
@@ -5155,15 +5249,23 @@ class EnhancedTradingEngine:
                     if not self.running: break
                     
                     # Every 5 seconds, check if we need to manage existing positions
-                    if _ % 5 == 0 and self.active_positions:
-                        df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
-                        if df_current_quick is not None:
-                            df_features_quick = self.feature_engine.calculate_features(df_current_quick)
-                            self.exit_manager.manage_positions(
-                                df_features_quick, 
-                                self.active_positions, 
-                                None, 0.5
-                            )
+                    if _ % 5 == 0:
+                         # 1. Check for closed positions (Immediate Logging)
+                         self.check_closed_positions()
+                         
+                         # 2. Manage active positions
+                         if self.active_positions:
+                            df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
+                            if df_current_quick is not None:
+                                df_features_quick = self.feature_engine.calculate_features(df_current_quick)
+                                self.exit_manager.manage_positions(
+                                    df_features_quick, 
+                                    self.active_positions, 
+                                    None, 0.5
+                                )
+                                # Log short dashboard
+                                for ticket, trade in self.active_positions.items():
+                                    ProfessionalLogger.log(f"Active #{ticket}: {trade['type']} @ {trade['open_price']:.2f} | PnL: {trade.get('pnl', 0):.2f} | HWM: {trade.get('max_runge_profit', 0):.2f}", "TRADE", "MANAGER")
                     
                     time.sleep(1)
                 
