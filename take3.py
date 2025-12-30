@@ -4437,327 +4437,328 @@ class EnhancedTradingEngine:
         else:
             ProfessionalLogger.log("Trade execution failed", "ERROR", "ENGINE")
             
-        def _calculate_atr(self, df, period=14):
-            """Helper method to calculate ATR"""
-            try:
-                high = df['high'].values
-                low = df['low'].values
-                close = df['close'].values
-                
-                # Calculate True Range
-                tr = np.zeros(len(df))
-                for i in range(1, len(df)):
-                    hl = high[i] - low[i]
-                    hc = abs(high[i] - close[i-1])
-                    lc = abs(low[i] - close[i-1])
-                    tr[i] = max(hl, hc, lc)
-                
-                # Calculate ATR
-                atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
-                return atr
-                
-            except Exception as e:
-                ProfessionalLogger.log(f"ATR calculation error: {e}", "WARNING", "EXECUTOR")
-                return 0.001  # Default small value
-        def run(self):
-            """Main execution method"""
-            print("\n" + "=" * 70)
-            print("🤖 ENHANCED PROFESSIONAL MT5 ALGORITHMIC TRADING SYSTEM")
-            print("📊 Advanced Statistical Analysis | Dynamic Labeling | Regime-Aware Models")
-            print("=" * 70 + "\n")
+    def _calculate_atr(self, df, period=14):
+        """Helper method to calculate ATR"""
+        try:
+            high = df['high'].values
+            low = df['low'].values
+            close = df['close'].values
             
-            ProfessionalLogger.log("Starting enhanced trading system with all improvements...", "INFO", "ENGINE")
+            # Calculate True Range
+            tr = np.zeros(len(df))
+            for i in range(1, len(df)):
+                hl = high[i] - low[i]
+                hc = abs(high[i] - close[i-1])
+                lc = abs(low[i] - close[i-1])
+                tr[i] = max(hl, hc, lc)
             
-            if not self.connect_mt5():
-                return
+            # Calculate ATR
+            atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
+            return atr
             
-            self.train_initial_model()
-            
-            self.run_enhanced_live_trading()
+        except Exception as e:
+            ProfessionalLogger.log(f"ATR calculation error: {e}", "WARNING", "EXECUTOR")
+            return 0.001  # Default small value
+
+    def run(self):
+        """Main execution method"""
+        print("\n" + "=" * 70)
+        print("🤖 ENHANCED PROFESSIONAL MT5 ALGORITHMIC TRADING SYSTEM")
+        print("📊 Advanced Statistical Analysis | Dynamic Labeling | Regime-Aware Models")
+        print("=" * 70 + "\n")
         
-        def run_enhanced_live_trading(self):
-            """Enhanced live trading with all new features"""
-            ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
-            ProfessionalLogger.log("STARTING ENHANCED LIVE TRADING", "TRADE", "ENGINE")
-            ProfessionalLogger.log(f"Dynamic Barriers: {'ENABLED' if Config.USE_DYNAMIC_BARRIERS else 'DISABLED'}", "INFO", "ENGINE")
-            ProfessionalLogger.log(f"Entry Confirmation: {'ENABLED' if Config.USE_CONFIRMATION_ENTRY else 'DISABLED'}", "INFO", "ENGINE")
-            ProfessionalLogger.log(f"Parameter Optimization: {'ENABLED' if Config.PARAM_OPTIMIZATION_ENABLED else 'DISABLED'}", "INFO", "ENGINE")
-            ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
-            
-            try:
-                while True:
-                    self.run_periodic_tasks()
-                    
-                    required_lookback = max(500, Config.TREND_MA * 2) 
-                    
-                    rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
-                    if rates is None or len(rates) < Config.TREND_MA + 10:
-                        ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
-                        time.sleep(10)
-                        continue
-                    
-                    df_current = pd.DataFrame(rates)
-                    
-                    # ==========================================
-                    # MULTI-TIMEFRAME ANALYSIS
-                    # ==========================================
-                    multi_tf_signal = None
-                    multi_tf_confidence = 0
-                    multi_tf_alignment = 0
-                    min_confidence_override = Config.MIN_CONFIDENCE
-                    min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
-                    
-                    if Config.MULTI_TIMEFRAME_ENABLED:
-                        try:
-                            mtf_recommendation = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
+        ProfessionalLogger.log("Starting enhanced trading system with all improvements...", "INFO", "ENGINE")
+        
+        if not self.connect_mt5():
+            return
+        
+        self.train_initial_model()
+        
+        self.run_enhanced_live_trading()
+
+    def run_enhanced_live_trading(self):
+        """Enhanced live trading with all new features"""
+        ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
+        ProfessionalLogger.log("STARTING ENHANCED LIVE TRADING", "TRADE", "ENGINE")
+        ProfessionalLogger.log(f"Dynamic Barriers: {'ENABLED' if Config.USE_DYNAMIC_BARRIERS else 'DISABLED'}", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"Entry Confirmation: {'ENABLED' if Config.USE_CONFIRMATION_ENTRY else 'DISABLED'}", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"Parameter Optimization: {'ENABLED' if Config.PARAM_OPTIMIZATION_ENABLED else 'DISABLED'}", "INFO", "ENGINE")
+        ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
+        
+        try:
+            while True:
+                self.run_periodic_tasks()
+                
+                required_lookback = max(500, Config.TREND_MA * 2) 
+                
+                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
+                if rates is None or len(rates) < Config.TREND_MA + 10:
+                    ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
+                    time.sleep(10)
+                    continue
+                
+                df_current = pd.DataFrame(rates)
+                
+                # ==========================================
+                # MULTI-TIMEFRAME ANALYSIS
+                # ==========================================
+                multi_tf_signal = None
+                multi_tf_confidence = 0
+                multi_tf_alignment = 0
+                min_confidence_override = Config.MIN_CONFIDENCE
+                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
+                
+                if Config.MULTI_TIMEFRAME_ENABLED:
+                    try:
+                        mtf_recommendation = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
+                        
+                        if mtf_recommendation:
+                            multi_tf_signal = mtf_recommendation.get('consensus_signal')
+                            multi_tf_confidence = mtf_recommendation.get('confidence', 0)
+                            multi_tf_alignment = mtf_recommendation.get('alignment_score', 0)
+                            trend_filter_passed = mtf_recommendation.get('trend_filter_passed', True)
                             
-                            if mtf_recommendation:
-                                multi_tf_signal = mtf_recommendation.get('consensus_signal')
-                                multi_tf_confidence = mtf_recommendation.get('confidence', 0)
-                                multi_tf_alignment = mtf_recommendation.get('alignment_score', 0)
-                                trend_filter_passed = mtf_recommendation.get('trend_filter_passed', True)
-                                
-                                recommendation = mtf_recommendation.get('recommendation', 'HOLD')
-                                ProfessionalLogger.log(
-                                    f"Multi-TF: {recommendation} | "
-                                    f"Align: {multi_tf_alignment:.0%} | "
-                                    f"Conf: {multi_tf_confidence:.0%} | "
-                                    f"Trend Filter: {'PASS' if trend_filter_passed else 'FAIL'}",
-                                    "ANALYSIS", "MULTI_TF"
-                                )
-                                
-                                if not trend_filter_passed:
-                                    ProfessionalLogger.log("Trade blocked by H1 trend filter", "WARNING", "MULTI_TF")
-                                    signal = None
-                                
-                                elif multi_tf_alignment < Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
-                                    min_confidence_override = Config.MIN_CONFIDENCE * 1.3
-                                    min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 1.2
-                                    ProfessionalLogger.log(
-                                        f"Low alignment ({multi_tf_alignment:.0%} < {Config.TIMEFRAME_ALIGNMENT_THRESHOLD:.0%}) - "
-                                        f"raising thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
-                                        "WARNING", "MULTI_TF"
-                                    )
-                                
-                                elif recommendation in ['STRONG_BUY', 'STRONG_SELL']:
-                                    min_confidence_override = Config.MIN_CONFIDENCE * 0.9
-                                    min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 0.9
-                                    ProfessionalLogger.log(
-                                        f"Strong multi-TF signal - "
-                                        f"lowering thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
-                                        "INFO", "MULTI_TF"
-                                    )
-                                    
-                        except Exception as e:
-                            ProfessionalLogger.log(f"Multi-TF analysis error: {str(e)}", "ERROR", "MULTI_TF")
-                            min_confidence_override = Config.MIN_CONFIDENCE
-                            min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
-                    
-                    # ==========================================
-                    # MAIN MODEL PREDICTION
-                    # ==========================================
-                    signal, confidence, features, model_details = self.model.predict(df_current)
-                    
-                    # ==========================================
-                    # ADAPTIVE EXIT LOGIC
-                    # ==========================================
-                    df_features = self.feature_engine.calculate_features(df_current)
-                    
-                    if self.active_positions:
-                        self.exit_manager.manage_positions(
-                            df_features, 
-                            self.active_positions, 
-                            signal, 
-                            confidence
-                        )
-                    
-                    # ==========================================
-                    # SIGNAL VALIDATION & FILTERING
-                    # ==========================================
-                    if signal is None:
-                        if self.iteration % 30 == 0:
-                            tick = mt5.symbol_info_tick(Config.SYMBOL)
-                            if tick:
-                                price = tick.ask
-                                positions = self.get_current_positions()
-                                ProfessionalLogger.log(
-                                    f"Waiting for signal | Price: {price:.2f} | "
-                                    f"Positions: {positions} | "
-                                    f"Multi-TF: {multi_tf_signal if multi_tf_signal is not None else 'N/A'}",
-                                    "INFO", "ENGINE"
-                                )
-                        time.sleep(60)
-                        continue
-                    
-                    # Calculate model agreement
-                    agreement = 0
-                    if model_details:
-                        predictions = [m['prediction'] for m in model_details.values() 
-                                    if m['prediction'] != -1]
-                        if predictions:
-                            agreement = predictions.count(signal) / len(predictions)
-                    
-                    # Multi-TF validation
-                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
-                        if multi_tf_signal != 0.5:
-                            signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
-                                        (signal == 0 and multi_tf_signal < 0.4)
+                            recommendation = mtf_recommendation.get('recommendation', 'HOLD')
+                            ProfessionalLogger.log(
+                                f"Multi-TF: {recommendation} | "
+                                f"Align: {multi_tf_alignment:.0%} | "
+                                f"Conf: {multi_tf_confidence:.0%} | "
+                                f"Trend Filter: {'PASS' if trend_filter_passed else 'FAIL'}",
+                                "ANALYSIS", "MULTI_TF"
+                            )
                             
-                            if not signal_match:
+                            if not trend_filter_passed:
+                                ProfessionalLogger.log("Trade blocked by H1 trend filter", "WARNING", "MULTI_TF")
+                                signal = None
+                            
+                            elif multi_tf_alignment < Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
+                                min_confidence_override = Config.MIN_CONFIDENCE * 1.3
+                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 1.2
                                 ProfessionalLogger.log(
-                                    f"Model signal ({'BUY' if signal == 1 else 'SELL'}) "
-                                    f"rejected by multi-TF consensus ({multi_tf_signal:.2f})",
+                                    f"Low alignment ({multi_tf_alignment:.0%} < {Config.TIMEFRAME_ALIGNMENT_THRESHOLD:.0%}) - "
+                                    f"raising thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
                                     "WARNING", "MULTI_TF"
                                 )
-                                time.sleep(60)
-                                continue
-                    
-                    # Combined confidence
-                    combined_confidence = confidence
-                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_confidence > 0:
-                        combined_confidence = (confidence * 0.7) + (multi_tf_confidence * 0.3)
-                    
-                    # Signal Quality Filtering
-                    market_context = {
-                        'volatility_regime': features.get('volatility_regime', 1),
-                        'spread_pips': 2,  # Default
-                        'hour': datetime.now().hour,
-                        'high_impact_news_soon': False,
-                        'existing_positions': list(self.active_positions.values()),
-                        'vol_surprise': features.get('vol_surprise', 0),
-                        'market_regime': self.last_regime,
-                        'multi_tf_alignment': multi_tf_alignment
-                    }
-                    
-                    is_valid, filter_reason = self.signal_filter.validate_signal(
-                        signal, combined_confidence, features, market_context
+                            
+                            elif recommendation in ['STRONG_BUY', 'STRONG_SELL']:
+                                min_confidence_override = Config.MIN_CONFIDENCE * 0.9
+                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 0.9
+                                ProfessionalLogger.log(
+                                    f"Strong multi-TF signal - "
+                                    f"lowering thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
+                                    "INFO", "MULTI_TF"
+                                )
+                                
+                    except Exception as e:
+                        ProfessionalLogger.log(f"Multi-TF analysis error: {str(e)}", "ERROR", "MULTI_TF")
+                        min_confidence_override = Config.MIN_CONFIDENCE
+                        min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
+                
+                # ==========================================
+                # MAIN MODEL PREDICTION
+                # ==========================================
+                signal, confidence, features, model_details = self.model.predict(df_current)
+                
+                # ==========================================
+                # ADAPTIVE EXIT LOGIC
+                # ==========================================
+                df_features = self.feature_engine.calculate_features(df_current)
+                
+                if self.active_positions:
+                    self.exit_manager.manage_positions(
+                        df_features, 
+                        self.active_positions, 
+                        signal, 
+                        confidence
                     )
-                    
-                    if not is_valid:
-                        ProfessionalLogger.log(f"Signal rejected by filter: {filter_reason}", "FILTER", "ENGINE")
-                        time.sleep(60)
-                        continue
-                    
-                    # Entry Timing Confirmation
-                    if Config.USE_CONFIRMATION_ENTRY:
-                        should_enter, entry_reason = self.entry_timing.should_enter(
-                            signal, combined_confidence, features, df_current
-                        )
-                        
-                        if not should_enter:
-                            ProfessionalLogger.log(f"Entry delayed: {entry_reason}", "CONFIRMATION", "ENGINE")
-                            time.sleep(60)
-                            continue
-                    
-                    # Log comprehensive signal analysis
-                    signal_type = "BUY" if signal == 1 else "SELL"
-                    status_msg = (f"Signal Analysis | {signal_type} | "
-                                f"Model Conf: {confidence:.1%} | "
-                                f"Agreement: {agreement:.0%} | ")
-                    
-                    if Config.MULTI_TIMEFRAME_ENABLED:
-                        status_msg += f"Multi-TF Align: {multi_tf_alignment:.0%} | "
-                        status_msg += f"Combined Conf: {combined_confidence:.1%}"
-                    else:
-                        status_msg += f"Price: {df_current['close'].iloc[-1]:.2f}"
-                    
-                    ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
-                    
-                    # Log key features
-                    if features:
-                        key_features = {
-                            'rsi': features.get('rsi_normalized', 0) * 50 + 50,
-                            'volatility': features.get('volatility', 0),
-                            'regime': features.get('regime_encoded', 0),
-                            'atr_percent': features.get('atr_percent', 0)
-                        }
-                        ProfessionalLogger.log(
-                            f"Key Features: RSI={key_features['rsi']:.1f} | "
-                            f"Vol={key_features['volatility']:.4f} | "
-                            f"Regime={key_features['regime']} | "
-                            f"ATR%={key_features['atr_percent']:.4f}",
-                            "DATA", "ENGINE"
-                        )
-                    
-                    # ==========================================
-                    # TRADE EXECUTION DECISION
-                    # ==========================================
-                    execute_trade = False
-                    execution_reason = ""
-                    
-                    if (combined_confidence >= min_confidence_override and 
-                        agreement >= min_agreement_override):
-                        
-                        if Config.MULTI_TIMEFRAME_ENABLED:
-                            if multi_tf_alignment >= Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
-                                execute_trade = True
-                                execution_reason = "Strong multi-TF alignment"
-                            elif combined_confidence > (min_confidence_override * 1.5):
-                                execute_trade = True
-                                execution_reason = f"Very high confidence ({combined_confidence:.1%})"
-                            else:
-                                execution_reason = f"Low multi-TF alignment ({multi_tf_alignment:.0%})"
-                        else:
-                            execute_trade = True
-                            execution_reason = "Standard model signal"
-                    
-                    if execute_trade:
-                        ProfessionalLogger.log(
-                            f"🎯 {execution_reason} - Executing {signal_type} signal! | "
-                            f"Combined Confidence: {combined_confidence:.1%}",
-                            "SUCCESS", "ENGINE"
-                        )
-                        
-                        if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
-                            if 'multi_tf' not in model_details:
-                                model_details['multi_tf'] = {}
-                            model_details['multi_tf'].update({
-                                'consensus_signal': multi_tf_signal,
-                                'alignment_score': multi_tf_alignment,
-                                'confidence': multi_tf_confidence,
-                                'min_thresholds_applied': {
-                                    'confidence': min_confidence_override,
-                                    'agreement': min_agreement_override
-                                }
-                            })
-                        
-                        self.execute_trade(signal, combined_confidence, df_current, features, model_details)
-                    else:
-                        if self.iteration % 10 == 0:
+                
+                # ==========================================
+                # SIGNAL VALIDATION & FILTERING
+                # ==========================================
+                if signal is None:
+                    if self.iteration % 30 == 0:
+                        tick = mt5.symbol_info_tick(Config.SYMBOL)
+                        if tick:
+                            price = tick.ask
+                            positions = self.get_current_positions()
                             ProfessionalLogger.log(
-                                f"Signal rejected | Reason: {execution_reason} | "
-                                f"Conf: {combined_confidence:.1%} (need {min_confidence_override:.1%}) | "
-                                f"Agree: {agreement:.0%} (need {min_agreement_override:.0%})",
+                                f"Waiting for signal | Price: {price:.2f} | "
+                                f"Positions: {positions} | "
+                                f"Multi-TF: {multi_tf_signal if multi_tf_signal is not None else 'N/A'}",
                                 "INFO", "ENGINE"
                             )
+                    time.sleep(60)
+                    continue
+                
+                # Calculate model agreement
+                agreement = 0
+                if model_details:
+                    predictions = [m['prediction'] for m in model_details.values() 
+                                if m['prediction'] != -1]
+                    if predictions:
+                        agreement = predictions.count(signal) / len(predictions)
+                
+                # Multi-TF validation
+                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
+                    if multi_tf_signal != 0.5:
+                        signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
+                                    (signal == 0 and multi_tf_signal < 0.4)
+                        
+                        if not signal_match:
+                            ProfessionalLogger.log(
+                                f"Model signal ({'BUY' if signal == 1 else 'SELL'}) "
+                                f"rejected by multi-TF consensus ({multi_tf_signal:.2f})",
+                                "WARNING", "MULTI_TF"
+                            )
+                            time.sleep(60)
+                            continue
+                
+                # Combined confidence
+                combined_confidence = confidence
+                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_confidence > 0:
+                    combined_confidence = (confidence * 0.7) + (multi_tf_confidence * 0.3)
+                
+                # Signal Quality Filtering
+                market_context = {
+                    'volatility_regime': features.get('volatility_regime', 1),
+                    'spread_pips': 2,  # Default
+                    'hour': datetime.now().hour,
+                    'high_impact_news_soon': False,
+                    'existing_positions': list(self.active_positions.values()),
+                    'vol_surprise': features.get('vol_surprise', 0),
+                    'market_regime': self.last_regime,
+                    'multi_tf_alignment': multi_tf_alignment
+                }
+                
+                is_valid, filter_reason = self.signal_filter.validate_signal(
+                    signal, combined_confidence, features, market_context
+                )
+                
+                if not is_valid:
+                    ProfessionalLogger.log(f"Signal rejected by filter: {filter_reason}", "FILTER", "ENGINE")
+                    time.sleep(60)
+                    continue
+                
+                # Entry Timing Confirmation
+                if Config.USE_CONFIRMATION_ENTRY:
+                    should_enter, entry_reason = self.entry_timing.should_enter(
+                        signal, combined_confidence, features, df_current
+                    )
                     
-                    self.update_performance_metrics()
-                    
-                    sleep_time = 60
+                    if not should_enter:
+                        ProfessionalLogger.log(f"Entry delayed: {entry_reason}", "CONFIRMATION", "ENGINE")
+                        time.sleep(60)
+                        continue
+                
+                # Log comprehensive signal analysis
+                signal_type = "BUY" if signal == 1 else "SELL"
+                status_msg = (f"Signal Analysis | {signal_type} | "
+                            f"Model Conf: {confidence:.1%} | "
+                            f"Agreement: {agreement:.0%} | ")
+                
+                if Config.MULTI_TIMEFRAME_ENABLED:
+                    status_msg += f"Multi-TF Align: {multi_tf_alignment:.0%} | "
+                    status_msg += f"Combined Conf: {combined_confidence:.1%}"
+                else:
+                    status_msg += f"Price: {df_current['close'].iloc[-1]:.2f}"
+                
+                ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
+                
+                # Log key features
+                if features:
+                    key_features = {
+                        'rsi': features.get('rsi_normalized', 0) * 50 + 50,
+                        'volatility': features.get('volatility', 0),
+                        'regime': features.get('regime_encoded', 0),
+                        'atr_percent': features.get('atr_percent', 0)
+                    }
+                    ProfessionalLogger.log(
+                        f"Key Features: RSI={key_features['rsi']:.1f} | "
+                        f"Vol={key_features['volatility']:.4f} | "
+                        f"Regime={key_features['regime']} | "
+                        f"ATR%={key_features['atr_percent']:.4f}",
+                        "DATA", "ENGINE"
+                    )
+                
+                # ==========================================
+                # TRADE EXECUTION DECISION
+                # ==========================================
+                execute_trade = False
+                execution_reason = ""
+                
+                if (combined_confidence >= min_confidence_override and 
+                    agreement >= min_agreement_override):
                     
                     if Config.MULTI_TIMEFRAME_ENABLED:
-                        if features and 'volatility' in features:
-                            vol = features['volatility']
-                            if vol > 0.015:
-                                sleep_time = 30
-                            elif vol < 0.005:
-                                sleep_time = 90
-                        
-                        if execute_trade or self.active_positions:
-                            sleep_time = max(30, sleep_time // 2)
+                        if multi_tf_alignment >= Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
+                            execute_trade = True
+                            execution_reason = "Strong multi-TF alignment"
+                        elif combined_confidence > (min_confidence_override * 1.5):
+                            execute_trade = True
+                            execution_reason = f"Very high confidence ({combined_confidence:.1%})"
+                        else:
+                            execution_reason = f"Low multi-TF alignment ({multi_tf_alignment:.0%})"
+                    else:
+                        execute_trade = True
+                        execution_reason = "Standard model signal"
+                
+                if execute_trade:
+                    ProfessionalLogger.log(
+                        f"🎯 {execution_reason} - Executing {signal_type} signal! | "
+                        f"Combined Confidence: {combined_confidence:.1%}",
+                        "SUCCESS", "ENGINE"
+                    )
                     
-                    time.sleep(sleep_time)
+                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
+                        if 'multi_tf' not in model_details:
+                            model_details['multi_tf'] = {}
+                        model_details['multi_tf'].update({
+                            'consensus_signal': multi_tf_signal,
+                            'alignment_score': multi_tf_alignment,
+                            'confidence': multi_tf_confidence,
+                            'min_thresholds_applied': {
+                                'confidence': min_confidence_override,
+                                'agreement': min_agreement_override
+                            }
+                        })
                     
-            except KeyboardInterrupt:
-                ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
-            except Exception as e:
-                ProfessionalLogger.log(f"Unexpected error in live trading: {str(e)}", "ERROR", "ENGINE")
-                import traceback
-                traceback.print_exc()
-            finally:
-                self.print_performance_report()
-                mt5.shutdown()
-                ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
+                    self.execute_trade(signal, combined_confidence, df_current, features, model_details)
+                else:
+                    if self.iteration % 10 == 0:
+                        ProfessionalLogger.log(
+                            f"Signal rejected | Reason: {execution_reason} | "
+                            f"Conf: {combined_confidence:.1%} (need {min_confidence_override:.1%}) | "
+                            f"Agree: {agreement:.0%} (need {min_agreement_override:.0%})",
+                            "INFO", "ENGINE"
+                        )
+                
+                self.update_performance_metrics()
+                
+                sleep_time = 60
+                
+                if Config.MULTI_TIMEFRAME_ENABLED:
+                    if features and 'volatility' in features:
+                        vol = features['volatility']
+                        if vol > 0.015:
+                            sleep_time = 30
+                        elif vol < 0.005:
+                            sleep_time = 90
+                    
+                    if execute_trade or self.active_positions:
+                        sleep_time = max(30, sleep_time // 2)
+                
+                time.sleep(sleep_time)
+                
+        except KeyboardInterrupt:
+            ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
+        except Exception as e:
+            ProfessionalLogger.log(f"Unexpected error in live trading: {str(e)}", "ERROR", "ENGINE")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.print_performance_report()
+            mt5.shutdown()
+            ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
 
 # ==========================================
 # MAIN FUNCTION
