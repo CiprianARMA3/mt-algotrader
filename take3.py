@@ -3539,7 +3539,7 @@ class MultiTimeframeAnalyser:
         weighted_signal = np.average(signals, weights=weights)
         analysis['consensus_signal'] = 1 if weighted_signal > 0.5 else 0 if weighted_signal < -0.5 else 0.5
         
-        signal_directions = [1 if s > 0 else -1 if s < 0 else 0 for s in signals]
+        signal_directions = [1 if s == 1 else -1 if s == 0 else 0 for s in signals]
         if len(signal_directions) > 1:
             agreement = sum(1 for i in range(len(signal_directions)) 
                           for j in range(i+1, len(signal_directions)) 
@@ -3703,6 +3703,9 @@ class MultiTimeframeAnalyser:
             elif analysis['consensus_signal'] == 0:
                 recommendation['recommendation'] = 'STRONG_SELL' if analysis['confidence'] > 0.7 else 'SELL'
                 recommendation['recommendation_strength'] = analysis['confidence']
+            else:
+                recommendation['recommendation'] = 'HOLD'
+                recommendation['recommendation_strength'] = 0
         elif analysis['alignment_score'] >= 0.5:
             recommendation['recommendation'] = 'WEAK_BUY' if analysis['consensus_signal'] == 1 else 'WEAK_SELL' if analysis['consensus_signal'] == 0 else 'HOLD'
             recommendation['recommendation_strength'] = analysis['confidence'] * 0.5
