@@ -5421,13 +5421,14 @@ class MultiTimeframeAnalyser:
         else:
             analysis['consensus_signal'] = 0.5
         
+        # NEW: Weighted Alignment Score
+        # Calculates what percentage of total WEIGHT agrees with the consensus
+        consensus_weight = sum([w for s, w in zip(signals, weights) if s == analysis['consensus_signal']])
+        total_active_weight = sum(weights)
+        analysis['alignment_score'] = consensus_weight / total_active_weight if total_active_weight > 0 else 0
+        
+        # Legacy direction mapping for trend filter compatibility
         signal_directions = [1 if s == 1 else -1 if s == 0 else 0 for s in signals]
-        if len(signal_directions) > 1:
-            agreement = sum(1 for i in range(len(signal_directions)) 
-                          for j in range(i+1, len(signal_directions)) 
-                          if signal_directions[i] * signal_directions[j] > 0)
-            total_pairs = len(signal_directions) * (len(signal_directions) - 1) / 2
-            analysis['alignment_score'] = agreement / total_pairs if total_pairs > 0 else 0
         
         # Trend Filter Code (Checks H1 or M30)
         filter_tf = 'H1' if 'H1' in analysis['timeframes'] else 'M30'

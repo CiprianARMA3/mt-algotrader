@@ -88,5 +88,15 @@
         "hurst_exponent": 0.6138563748736929,
         "rsi": 50,
         "volatility": 0.0017748977697849347
+    },
+    {
+        "timestamp": "2025-12-31T19:00:41.930807",
+        "price": 4325.15,
+        "regime": "trending",
+        "dom_imbalance": -0.9781488225672047,
+        "entropy": -3793.35525246336,
+        "hurst_exponent": 0.5904740621923672,
+        "rsi": 50,
+        "volatility": 0.0017834299833133624
     }
 ]
