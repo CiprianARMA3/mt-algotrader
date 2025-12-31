@@ -3830,6 +3830,12 @@ class EnhancedEnsemble:
                 # Ensure institutional timestamps are also standardized
                 inst_data['time'] = pd.to_datetime(inst_data['time'])
                 
+                # IMPORTANT: Remove columns that overlap with price features to avoid _x/_y suffixes
+                # We only want the unique institutional data from the snapshots
+                cols_to_keep = ['time', 'dom_imbalance', 'regime', 'entropy', 'hurst']
+                # Only keep columns that actually exist in the snapshot
+                inst_data = inst_data[[c for c in cols_to_keep if c in inst_data.columns]]
+                
                 # Align memory with bars (Match the most recent institutional snapshot to each bar)
                 df_features = pd.merge_asof(
                     df_features.sort_values('time'), 
@@ -3839,20 +3845,33 @@ class EnhancedEnsemble:
                 )
                 # Fill missing memory (for candles that existed before snapshots started)
                 df_features['dom_imbalance'] = df_features.get('dom_imbalance', 0).fillna(0)
+                # Note: 'regime' from snapshot vs potentially 'regime' from technicals
+                # Map snapshot regime to encoded number
                 df_features['regime_encoded'] = df_features.get('regime', 'unknown').map({'trending': 1, 'mean_reverting': 2, 'volatile': 3, 'stress': 4}).fillna(0)
             
             # 3. Labeling and Formatting
             df_labeled = self.feature_engine.create_labels(df_features, method='dynamic')
             df_labeled = df_labeled.dropna(subset=['label'])
             
-            all_feature_cols = self.feature_engine.get_feature_columns()
-            # Dynamic addition: if institutional columns exist, they become permanent features
-            for extra in ['dom_imbalance', 'regime_encoded', 'entropy', 'hurst']:
-                if extra in df_labeled.columns and extra not in all_feature_cols:
-                    all_feature_cols.append(extra)
+            # --- FINAL FEATURE ALIGNMENT (The "Fix") ---
+            # Get the base list of what the machine brain expects
+            base_cols = self.feature_engine.get_feature_columns()
             
-            self.trained_feature_columns = all_feature_cols
-            X = df_labeled[all_feature_cols].copy().fillna(0).replace([np.inf, -np.inf], 0)
+            # Combine technicals with our new institutional memory columns
+            required_cols = list(dict.fromkeys(base_cols + ['dom_imbalance', 'regime_encoded', 'entropy', 'hurst']))
+            
+            # Mission-Critical Guard: Ensure every single column exists before indexing
+            final_feature_list = []
+            for col in required_cols:
+                if col in df_labeled.columns:
+                    final_feature_list.append(col)
+                else:
+                    # Emergency recovery: If a column vanished, fill it with 0s so we don't crash
+                    df_labeled[col] = 0.0
+                    final_feature_list.append(col)
+            
+            self.trained_feature_columns = final_feature_list
+            X = df_labeled[final_feature_list].copy().fillna(0).replace([np.inf, -np.inf], 0)
             
             for col in X.columns:
                 X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
