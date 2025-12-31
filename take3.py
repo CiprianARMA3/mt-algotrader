@@ -252,18 +252,32 @@ class Config:
     LOW_VOL_SIZE_MULTIPLIER = 1.2
     
     # ==========================================
-    # TIME-BASED FILTERS
+    # TIME-BASED FILTERS & SWING MODE
     # ==========================================
-    SESSION_AWARE_TRADING = True  # Keep aware, but don't block
+    SESSION_AWARE_TRADING = True
+    SWING_MODE_ENABLED = True
     
-    # Trading Sessions (UTC times)
-    AVOID_ASIAN_SESSION = False   # ENABLED 24/7 TRADING
-    PREFER_LONDON_NY_OVERLAP = True
+    # Session Hours (UTC)
+    PEAK_VOLATILITY_START = 8  # London Open
+    PEAK_VOLATILITY_END = 20   # NY Close
     
-    LONDON_OPEN_HOUR = 8
-    LONDON_CLOSE_HOUR = 16
-    NY_OPEN_HOUR = 13
-    NY_CLOSE_HOUR = 20
+    # Swing Mode Parameters (Outside Peak Hours)
+    SWING_ATR_MULTIPLIER = 3.5  # Wider SL
+    SWING_RR_RATIO = 2.5       # Target larger moves
+    SWING_MIN_H1_ALIGNMENT = 0.75 # Strict macro trend filter
+    SWING_EXIT_STALE_MINS = 1440 # 24-hour hold limit
+    
+    # Peak Hours Parameters (Scalping/Day Trading)
+    PEAK_ATR_MULTIPLIER = 1.5
+    PEAK_RR_RATIO = 1.8
+
+    @staticmethod
+    def is_swing_hour():
+        """Check if current time is outside peak volatility hours"""
+        current_hour = datetime.utcnow().hour
+        if Config.PEAK_VOLATILITY_START <= current_hour < Config.PEAK_VOLATILITY_END:
+            return False # Peak Hours
+        return True # Swing Hours
     
     # Avoid trading during:
     AVOID_FIRST_15MIN = True
@@ -3358,19 +3372,25 @@ class SignalQualityFilter:
             alignment = market_context['multi_tf_alignment']
             min_alignment = Config.TIMEFRAME_ALIGNMENT_THRESHOLD
             
-            # Adjust alignment threshold based on signal strength
-            if confidence > 0.7:
-                min_alignment *= 0.9  # Lower threshold for high confidence signals
-            
-            if alignment < min_alignment:
-                # RELAXED: If multi_tf_signal is neutral (0.5), bypass if confidence is high
-                multi_tf_signal = market_context.get('multi_tf_signal', 0.5)
-                if multi_tf_signal == 0.5 and confidence >= 0.60:
-                     validation_results.append(f"✓ Alignment Bypassed: Neutral session consensus but High confidence ({confidence:.1%})")
-                else:
-                    return False, f"Low multi-TF alignment: {alignment:.0%} < {min_alignment:.0%}"
-            
-            validation_results.append(f"✓ Multi-TF alignment: {alignment:.0%}")
+            # SWING MODE HARD BAR (Strict Macro Alignment)
+            if Config.is_swing_hour() and Config.SWING_MODE_ENABLED:
+                min_alignment = Config.SWING_MIN_H1_ALIGNMENT # Require 75%+
+                if alignment < min_alignment:
+                    return False, f"SWING MODE: Insufficient Macro Alignment ({alignment:.0%} < {min_alignment:.0%})"
+                validation_results.append(f"✓ SWING Alignment OK: {alignment:.0%}")
+            else:
+                # Normal Peak Hour logic
+                if confidence > 0.7:
+                    min_alignment *= 0.9
+                
+                if alignment < min_alignment:
+                    multi_tf_signal = market_context.get('multi_tf_signal', 0.5)
+                    if multi_tf_signal == 0.5 and confidence >= 0.60:
+                         validation_results.append(f"✓ Alignment Bypassed: Neutral session consensus but High confidence ({confidence:.1%})")
+                    else:
+                        return False, f"Low multi-TF alignment: {alignment:.0%} < {min_alignment:.0%}"
+                
+                validation_results.append(f"✓ Multi-TF alignment: {alignment:.0%}")
         elif not Config.REQUIRE_TIMEFRAME_ALIGNMENT:
             validation_results.append("✓ Multi-TF alignment: SKIPPED (Disabled in Config)")
         
@@ -4244,16 +4264,20 @@ class EnhancedExitManager:
             'aggressive': 4.0
         }
     
-    def manage_positions(self, df, active_positions, signal, confidence):
+    def manage_positions(self, df, active_positions, signal, confidence, fast_tick_update=False, current_price=None):
         """Enhanced position management with partial exits"""
-        
         if not active_positions:
             return
 
-        # Handle both DataFrame and dictionary inputs
+        # Handle "Fast" tick updates (high-frequency trailing/HWM)
+        if fast_tick_update and current_price:
+            for ticket, trade in list(active_positions.items()):
+                self._process_trailing_minimal(ticket, trade, current_price)
+            return
+
+        # Handle both DataFrame and dictionary inputs (Normal Bar-level updates)
         if isinstance(df, dict):
             latest = df
-            prev = df  # Fallback
             is_dataframe = False
         elif hasattr(df, 'empty'):
             if df.empty: return
@@ -4269,10 +4293,10 @@ class EnhancedExitManager:
         adx = latest.get('adx', 0)
         
         for ticket, trade in list(active_positions.items()):
-            
-            duration_bars = (int(time.time()) - trade['open_time']) / (Config.TIMEFRAME * 60 if hasattr(Config, 'TIMEFRAME') else 900)
-            if duration_bars < 2: 
-                continue
+            # Stable time check: Skip management for the first bar
+            duration_bars = (time.time() - trade['open_time']) / (Config.TIMEFRAME * 60 if hasattr(Config, 'TIMEFRAME') else 300)
+            if duration_bars < 0.5: # Half a bar minimum
+                 continue
 
             symbol = trade['symbol']
             trade_type = trade['type']
@@ -4281,7 +4305,6 @@ class EnhancedExitManager:
             current_tp = trade['take_profit']
             
             # MODEL INVALIDATION CHECK
-            model_flip = False
             if trade_type == 'BUY' and signal == 0 and confidence > 0.65:
                 ProfessionalLogger.log(f"📉 Model flipped to BEARISH (Conf: {confidence:.2f}) - Exiting BUY #{ticket}", "EXIT", "MANAGER")
                 if self.executor.close_position(ticket, symbol):
@@ -4296,49 +4319,34 @@ class EnhancedExitManager:
             # Calculate R-multiple
             if trade_type == 'BUY':
                 profit_points = close_price - entry_price
-                distance_to_sl = close_price - current_sl
             else:
                 profit_points = entry_price - close_price
-                distance_to_sl = current_sl - close_price
 
-            initial_risk = abs(entry_price - current_sl)
-            if initial_risk == 0: initial_risk = atr
+            initial_risk = trade.get('initial_risk', abs(entry_price - current_sl))
+            if initial_risk <= 0: initial_risk = atr if atr > 0 else 0.1
             r_multiple = profit_points / initial_risk
 
-            # 1. STALE TRADE EXIT (Time Decay)
-            # If held > 60 mins and profit < 0.5R, exit to free up capital
-            STALE_THRESHOLD_MINS = 60
-            MIN_PROFIT_R = 0.5
+            # 1. STALE TRADE EXIT: Lenient for Swing Trades
+            is_swing = trade.get('mode') == 'SWING'
+            stale_threshold = Config.SWING_EXIT_STALE_MINS if is_swing else 60
             
-            time_held_mins = (int(time.time()) - trade['open_time']) / 60
-            
-            if time_held_mins > STALE_THRESHOLD_MINS and r_multiple < MIN_PROFIT_R:
-                 # Ensure we are not negative (give it a bit more room if losing slightly, but close if dead flat)
-                 # If losing more than -0.5R, maybe let SL hit or wait. But if hovering near 0, KILL IT.
+            time_held_mins = (time.time() - trade['open_time']) / 60
+            if time_held_mins > stale_threshold and r_multiple < 0.5:
                  if r_multiple > -0.5: 
-                    ProfessionalLogger.log(f"💤 Stale Trade Exit (#{ticket}): Held {time_held_mins:.0f}m, Profit {r_multiple:.2f}R - Closing", "EXIT", "MANAGER")
+                    ProfessionalLogger.log(f"💤 Stale Trade Exit (#{ticket} {trade.get('mode')}): Held {time_held_mins:.0f}m - Closing", "EXIT", "MANAGER")
                     if self.executor.close_position(ticket, symbol):
                         active_positions.pop(ticket, None)
                     continue
 
-            # High Water Mark (HWM) Tracking for Profit Protection
-            trade['pnl'] = profit_points # Update current PnL
-            if profit_points > 0:
-                current_hwm = trade.get('max_runge_profit', 0)
-                if profit_points > current_hwm:
-                    trade['max_runge_profit'] = profit_points
-
-
-            initial_risk = abs(entry_price - current_sl)
-            if initial_risk == 0: 
-                initial_risk = atr
-            
-            r_multiple = profit_points / initial_risk
+            # 2. Update HWM & PnL
+            trade['pnl'] = profit_points
+            if profit_points > trade.get('max_runge_profit', 0):
+                trade['max_runge_profit'] = profit_points
 
             new_sl = current_sl
             sl_changed = False
 
-            # BREAKEVEN AT 1R
+            # 3. BREAKEVEN AT 1R
             if r_multiple > 1.0:
                 if trade_type == 'BUY':
                     be_price = entry_price + (atr * 0.1)
@@ -4353,7 +4361,7 @@ class EnhancedExitManager:
                         sl_changed = True
                         ProfessionalLogger.log(f"🛡️ Locked Breakeven for #{ticket} (1R reached)", "RISK", "MANAGER")
 
-            # RATCHET TRAILING STOP (INSTITUTIONAL GRADE)
+            # 4. RATCHET TRAILING STOP
             # As we get deeper in money, we trail TIGHTER to lock it in.
             
             # Tier 1: 1.5R Profit -> Trail at 1.0 ATR distance
@@ -4421,10 +4429,11 @@ class EnhancedExitManager:
                     active_positions.pop(ticket, None)
                 continue
             
-            # TIME-BASED EXIT (stagnant positions)
+            # TIME-BASED EXIT (stagnant positions) - Extended for Swing mode
             bars_held = self._calculate_bars_held(trade)
-            if bars_held > 50 and r_multiple < 0.5:
-                ProfessionalLogger.log(f"⏰ Time stop: Position #{ticket} stagnant for {bars_held} bars", "EXIT", "MANAGER")
+            max_bars = 200 if is_swing else 50
+            if bars_held > max_bars and r_multiple < 0.5:
+                ProfessionalLogger.log(f"⏰ Time stop: Position #{ticket} ({trade.get('mode')}) stagnant for {bars_held} bars", "EXIT", "MANAGER")
                 if self.executor.close_position(ticket, symbol):
                     active_positions.pop(ticket, None)
                 continue
@@ -4437,7 +4446,24 @@ class EnhancedExitManager:
             if sl_changed:
                 self.executor.modify_position(ticket, symbol, new_sl, current_tp)
                 trade['stop_loss'] = new_sl
-    
+
+    def _process_trailing_minimal(self, ticket, trade, current_price):
+        """High-speed PnL and HWM tracking for tick-level updates"""
+        try:
+            trade_type = trade['type']
+            entry_price = trade['open_price']
+            
+            if trade_type == 'BUY':
+                profit_points = current_price - entry_price
+            else:
+                profit_points = entry_price - current_price
+            
+            trade['pnl'] = profit_points
+            if profit_points > trade.get('max_runge_profit', 0):
+                trade['max_runge_profit'] = profit_points
+        except:
+            pass
+
     def _detect_momentum_exhaustion(self, df, trade):
         """Detect when trend momentum is fading with multiple confirmation methods"""
         
@@ -4458,14 +4484,15 @@ class EnhancedExitManager:
         prev_rsi = prev.get('rsi', 50)
         
         # 3. RSI Reversal (Crossing back from extremes)
-        # Faster than divergence - catches the immediate turn
+        is_swing = trade.get('mode') == 'SWING'
+        rsi_upper = 80 if is_swing else 70
+        rsi_lower = 20 if is_swing else 30
+        
         if trade['type'] == 'BUY':
-            # Was overbought (>70/75), now crossing back down
-            if prev_rsi > 70 and rsi < 70:
+            if prev_rsi > rsi_upper and rsi < rsi_upper:
                 return True
         else: # SELL
-            # Was oversold (<30/25), now crossing back up
-            if prev_rsi < 30 and rsi > 30:
+            if prev_rsi < rsi_lower and rsi > rsi_lower:
                 return True
                 
         # 4. Profit Giveback Protection (High Water Mark)
@@ -4475,10 +4502,12 @@ class EnhancedExitManager:
         
         if max_profit > 0: # We have been profitable
             giveback_ratio = (max_profit - current_profit) / max_profit
-            # Only trigger if profit was "significant" (e.g., > 1 ATR approx)
+            # Relaxed giveback for swing trades (50% vs 35%)
+            giveback_threshold = 0.50 if is_swing else 0.35
+            
             atr = latest.get('atr', 0)
-            if max_profit > (atr * 0.5) and giveback_ratio > 0.35:
-                 return True
+            if max_profit > (atr * 0.5) and giveback_ratio > giveback_threshold:
+                  return True
 
         # 5. Price/Momentum Divergence (Recent Peak Logic)
         if trade['type'] == 'BUY':
@@ -5314,7 +5343,13 @@ class MultiTimeframeAnalyser:
 
         # Define Dynamic Weights
         # Order: M1, M5, M15, M30, H1 (Aligned with Config.TIMEFRAMES)
-        if is_fast_market:
+        
+        # Check for SWING MODE (Outside Peak Hours)
+        if hasattr(Config, 'SWING_MODE_ENABLED') and Config.SWING_MODE_ENABLED and Config.is_swing_hour():
+            # Swing Mode: Silence M1/M5, Prioritize M30/H1
+            current_weights = [0.01, 0.04, 0.15, 0.40, 0.40]
+            regime_note = "SWING (Off-Peak Macro)"
+        elif is_fast_market:
             # Fast market: M15/M5 still lead, but M5 gets a boost for timing
             current_weights = [0.15, 0.35, 0.35, 0.10, 0.05]
             regime_note = "FAST (High Vol)"
@@ -6460,45 +6495,54 @@ class EnhancedTradingEngine:
              # I'll rely on Signal Quality for now to avoid errors.
              pass
 
-        # Adjust Lookup based Risk/Reward if enabled
-        target_rr = 2.0
-        if Config.ENABLE_LOOKUP_TABLES and self.feature_engine.lookup_tables:
-            target_rr = self.feature_engine.lookup_tables.get_rr_ratio(final_confidence)
-        
         # ==========================================
         # 2. CALCULATE DYNAMIC STOP LOSS & TAKE PROFIT
         # ==========================================
+        # Determine Session Multipliers
+        is_swing = Config.is_swing_hour() and Config.SWING_MODE_ENABLED
+        if is_swing:
+            atr_mult = Config.SWING_ATR_MULTIPLIER
+            target_rr = Config.SWING_RR_RATIO
+            trade_mode = "SWING"
+            ProfessionalLogger.log(f"🌙 SWING MODE ACTIVE: Applying {atr_mult}x ATR Stop", "INFO", "ENGINE")
+        else:
+            atr_mult = Config.PEAK_ATR_MULTIPLIER if hasattr(Config, 'PEAK_ATR_MULTIPLIER') else 1.5
+            target_rr = Config.PEAK_RR_RATIO if hasattr(Config, 'PEAK_RR_RATIO') else 2.0
+            trade_mode = "PEAK"
+
         atr = features.get('atr_percent', 0.001)
         if atr <= 0: atr = 0.001
         atr_absolute = atr * entry_price
         volatility = features.get('volatility', 0.01)
-        if volatility <= 0 or np.isnan(volatility): volatility = 0.01
-
-        # Use SmartOrderExecutor's advanced logic
-        sl_price = self.order_executor.calculate_dynamic_stop_loss(
-            entry_price, 
-            signal, 
-            atr_absolute, 
-            volatility, 
-            lookup_tables=self.feature_engine.lookup_tables if Config.ENABLE_LOOKUP_TABLES else None,
-            market_structure={'support': features.get('support', 0), 'resistance': features.get('resistance', 0)}
-        )
         
-        sl_distance = abs(entry_price - sl_price)
+        # Calculate SL using ATR multiplier
+        sl_distance = atr_absolute * atr_mult
+        
+        # Refine SL with Market Structure if available
+        support = features.get('support', 0)
+        resistance = features.get('resistance', 0)
+        if signal == 1 and support > 0:
+             # Ensure Stop is below support but not too far
+             sl_distance = max(sl_distance, entry_price - support + (symbol_info.point * 10))
+        elif signal == 0 and resistance > 0:
+             # Ensure Stop is above resistance
+             sl_distance = max(sl_distance, resistance - entry_price + (symbol_info.point * 10))
+             
         tp_distance = sl_distance * target_rr
         
         if signal == 1:
-            tp_price = entry_price + tp_distance
+            stop_loss = entry_price - sl_distance
+            take_profit = entry_price + tp_distance
         else:
-            tp_price = entry_price - tp_distance
+            stop_loss = entry_price + sl_distance
+            take_profit = entry_price - tp_distance
 
         # Verify minimum Stop Level
         min_dist = symbol_info.trade_stops_level * symbol_info.point
         if sl_distance < min_dist:
-             ProfessionalLogger.log(f"SL distance too small ({sl_distance} < {min_dist}). Adjusting.", "WARNING", "ENGINE")
              sl_distance = min_dist * 1.5
-             if signal == 1: sl_price = entry_price - sl_distance
-             else: sl_price = entry_price + sl_distance
+             if signal == 1: stop_loss = entry_price - sl_distance
+             else: stop_loss = entry_price + sl_distance
         
         # ==========================================
         # 3. CALCULATE POSITION SIZE (KELLY & VOLATILITY)
@@ -6585,62 +6629,9 @@ class EnhancedTradingEngine:
         
         ProfessionalLogger.log(f"Position sizing: Raw={volume_raw:.3f}, Final={volume:.3f}, Risk=${risk_amount:.2f}", "RISK", "ENGINE")
         
-        # ==========================================
-        # CALCULATE STOP LOSS AND TAKE PROFIT
-        # ==========================================
-        
-        if Config.USE_DYNAMIC_SL_TP:
-            atr_absolute = atr * entry_price
-            sl_distance = atr_absolute * Config.ATR_SL_MULTIPLIER
-            tp_distance = atr_absolute * Config.ATR_TP_MULTIPLIER
-        else:
-            sl_distance = entry_price * Config.FIXED_SL_PERCENT
-            tp_distance = entry_price * Config.FIXED_TP_PERCENT
-        
-        # Calculate actual SL/TP prices
-        if signal == 1:  # BUY
-            stop_loss = entry_price - sl_distance
-            take_profit = entry_price + tp_distance
-        else:  # SELL
-            stop_loss = entry_price + sl_distance
-            take_profit = entry_price - tp_distance
-        
-        # Validate SL/TP distances using symbol point
-        point = symbol_info.point if symbol_info.point > 0 else 0.01
-        sl_distance_points = abs(entry_price - stop_loss) / point
-        tp_distance_points = abs(entry_price - take_profit) / point
-        
-        if sl_distance_points < Config.MIN_SL_DISTANCE_POINTS:
-            sl_distance_points = Config.MIN_SL_DISTANCE_POINTS
-            if signal == 1:
-                stop_loss = entry_price - (sl_distance_points * point)
-            else:
-                stop_loss = entry_price + (sl_distance_points * point)
-        
-        if tp_distance_points < Config.MIN_TP_DISTANCE_POINTS:
-            tp_distance_points = Config.MIN_TP_DISTANCE_POINTS
-            if signal == 1:
-                take_profit = entry_price + (tp_distance_points * point)
-            else:
-                take_profit = entry_price - (tp_distance_points * point)
-        
-        # Validate Risk/Reward ratio
-        rr_ratio = tp_distance_points / sl_distance_points if sl_distance_points > 0 else 0
-        if rr_ratio < Config.MIN_RR_RATIO:
-            ProfessionalLogger.log(f"Risk/Reward too low: {rr_ratio:.2f} < {Config.MIN_RR_RATIO}", "WARNING", "ENGINE")
-            # Adjust TP to meet minimum RR
-            tp_distance_points = sl_distance_points * Config.MIN_RR_RATIO
-            if signal == 1:
-                take_profit = entry_price + (tp_distance_points * point)
-            else:
-                take_profit = entry_price - (tp_distance_points * point)
-            rr_ratio = Config.MIN_RR_RATIO
-        
         ProfessionalLogger.log(
-            f"Trade Setup: {trade_type_str} {volume:.3f} @ {entry_price:.5f} | "
-            f"SL: {stop_loss:.5f} ({sl_distance_points:.1f} pts) | "
-            f"TP: {take_profit:.5f} ({tp_distance_points:.1f} pts) | "
-            f"RR: {rr_ratio:.2f}",
+            f"Trade Setup ({trade_mode}): {trade_type_str} {volume:.3f} @ {entry_price:.5f} | "
+            f"SL: {stop_loss:.5f} | TP: {take_profit:.5f} | RR: {target_rr:.2f}",
             "INFO", "ENGINE"
         )
         
@@ -6701,11 +6692,15 @@ class EnhancedTradingEngine:
              # Track Position
              self.active_positions[result.order] = {
                  'ticket': result.order,
+                 'symbol': symbol,
                  'type': trade_type_str,
+                 'mode': trade_mode,
+                 'volume': volume,
                  'open_price': entry_price,
-                 'sl': stop_loss,
-                 'tp': take_profit,
-                 'open_time': datetime.now().isoformat(),
+                 'stop_loss': stop_loss,
+                 'take_profit': take_profit,
+                 'open_time': time.time(),
+                 'initial_risk': abs(entry_price - stop_loss),
                  'confidence': final_confidence,
                  'pnl': 0,
                  'max_runge_profit': 0
