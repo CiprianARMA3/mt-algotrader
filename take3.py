@@ -7,7 +7,7 @@ import os
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import sqlite3
 from collections import OrderedDict
@@ -284,7 +284,7 @@ class Config:
     @staticmethod
     def is_swing_hour():
         """Check if current time is outside peak volatility hours"""
-        current_hour = datetime.utcnow().hour
+        current_hour = datetime.now(timezone.utc).hour
         if Config.PEAK_VOLATILITY_START <= current_hour < Config.PEAK_VOLATILITY_END:
             return False # Peak Hours
         return True # Swing Hours
@@ -1648,7 +1648,7 @@ class AdvancedStatisticalAnalyzer:
             if len(clean_returns) < 50:
                 return np.std(clean_returns) if len(clean_returns) > 0 else 0.001
             
-            scaled_returns = clean_returns * 100.0
+            scaled_returns = clean_returns * 1000.0
             
             if np.std(scaled_returns) < 1e-10:
                 return np.std(clean_returns)
@@ -1659,7 +1659,7 @@ class AdvancedStatisticalAnalyzer:
             conditional_vol = result.conditional_volatility
             
             if len(conditional_vol) > 0:
-                return conditional_vol[-1] / 100
+                return conditional_vol[-1] / 1000.0
             else:
                 return np.std(clean_returns)
             
@@ -2818,11 +2818,11 @@ class EnhancedFeatureEngine:
             df['hurst_exponent'] = 0.5
             df['garch_volatility'] = 0
         
-        # Final cleanup
+        # Final cleanup - Optimized to avoid fragmentation
         all_features = self.get_feature_columns()
-        for feature in all_features:
-            if feature not in df.columns:
-                df[feature] = 0
+        missing_features = {f: 0 for f in all_features if f not in df.columns}
+        if missing_features:
+            df = pd.concat([df, pd.DataFrame(missing_features, index=df.index)], axis=1)
         
         # VWAP features
         df = self._add_vwap_features(df)
@@ -2852,9 +2852,10 @@ class EnhancedFeatureEngine:
             if 'datetime' in df.columns:
                 df['date'] = df['datetime'].dt.date
                 
-                # Daily cumulative reset
+                # Daily cumulative reset - Use include_groups=False for pandas compatibility
                 df['vwap'] = df.groupby('date').apply(
-                    lambda x: ( ((x['high'] + x['low'] + x['close'])/3) * x['tick_volume']).cumsum() / x['tick_volume'].cumsum().replace(0, 1)
+                    lambda x: ( ((x['high'] + x['low'] + x['close'])/3) * x['tick_volume']).cumsum() / x['tick_volume'].cumsum().replace(0, 1),
+                    include_groups=False
                 ).reset_index(level=0, drop=True)
             else:
                 vwap_num = (typical_price * df['tick_volume']).cumsum()
@@ -3222,7 +3223,7 @@ class SignalQualityFilter:
         
         # Adjust for time of day (higher threshold during low liquidity)
         # Standardize to UTC for all session logic
-        now_utc = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc)
         hour = now_utc.hour
         day_of_week = now_utc.weekday()
         
@@ -3310,7 +3311,7 @@ class SignalQualityFilter:
         # ==========================================
         if Config.SESSION_AWARE_TRADING:
             # Consistent UTC usage
-            now_utc = datetime.utcnow()
+            now_utc = datetime.now(timezone.utc)
             hour = now_utc.hour
             day_of_week = now_utc.weekday()
             
@@ -7141,7 +7142,7 @@ def main():
         # Log Current Mode Status
         is_swing = Config.is_swing_hour()
         mode_str = "🌙 SWING MODE" if is_swing else "☀️ PEAK MODE"
-        ProfessionalLogger.log(f"System Initialized in {mode_str} (UTC Hour: {datetime.utcnow().hour})", "SUCCESS", "ENGINE")
+        ProfessionalLogger.log(f"System Initialized in {mode_str} (UTC Hour: {datetime.now(timezone.utc).hour})", "SUCCESS", "ENGINE")
         
         ProfessionalLogger.log(f"  Volume min: {getattr(symbol_info, 'volume_min', 'N/A')}", "INFO", "ENGINE")
         ProfessionalLogger.log(f"  Volume max: {getattr(symbol_info, 'volume_max', 'N/A')}", "INFO", "ENGINE")
