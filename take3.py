@@ -94,8 +94,8 @@ class Config:
     MIN_TIME_BETWEEN_TRADES = 5  # REDUCED from 10 to 5 seconds
     
     # Loss Limits
-    MAX_DAILY_LOSS_PERCENT = 2.0
-    MAX_WEEKLY_LOSS_PERCENT = 5.0
+    MAX_DAILY_LOSS_PERCENT = 5.0    # INCREASED from 2.0 to 5.0 for Swing Mode volatility
+    MAX_WEEKLY_LOSS_PERCENT = 10.0  # INCREASED from 5.0 to 10.0
     MAX_DRAWDOWN_PERCENT = 10.0
     MAX_CONSECUTIVE_LOSSES = 3
     
@@ -4324,14 +4324,17 @@ class EnhancedExitManager:
             current_sl = trade['stop_loss']
             current_tp = trade['take_profit']
             
-            # MODEL INVALIDATION CHECK
-            if trade_type == 'BUY' and signal == 0 and confidence > 0.65:
-                ProfessionalLogger.log(f"📉 Model flipped to BEARISH (Conf: {confidence:.2f}) - Exiting BUY #{ticket}", "EXIT", "MANAGER")
+            # MODEL INVALIDATION CHECK: Stricter for Swing Trades
+            is_swing = trade.get('mode') == 'SWING'
+            flip_threshold = 0.80 if is_swing else 0.65
+            
+            if trade_type == 'BUY' and signal == 0 and confidence > flip_threshold:
+                ProfessionalLogger.log(f"📉 Model flipped to BEARISH (Conf: {confidence:.2f}) - Exiting BUY #{ticket} ({trade.get('mode')})", "EXIT", "MANAGER")
                 if self.executor.close_position(ticket, symbol):
                     active_positions.pop(ticket, None)
                 continue
-            elif trade_type == 'SELL' and signal == 1 and confidence > 0.65:
-                ProfessionalLogger.log(f"📈 Model flipped to BULLISH (Conf: {confidence:.2f}) - Exiting SELL #{ticket}", "EXIT", "MANAGER")
+            elif trade_type == 'SELL' and signal == 1 and confidence > flip_threshold:
+                ProfessionalLogger.log(f"📈 Model flipped to BULLISH (Conf: {confidence:.2f}) - Exiting SELL #{ticket} ({trade.get('mode')})", "EXIT", "MANAGER")
                 if self.executor.close_position(ticket, symbol):
                     active_positions.pop(ticket, None)
                 continue
@@ -4366,8 +4369,9 @@ class EnhancedExitManager:
             new_sl = current_sl
             sl_changed = False
 
-            # 3. BREAKEVEN AT 1R
-            if r_multiple > 1.0:
+            # 3. BREAKEVEN AT 1R (2R for Swing Trades)
+            be_threshold = 2.0 if is_swing else 1.0
+            if r_multiple > be_threshold:
                 if trade_type == 'BUY':
                     be_price = entry_price + (atr * 0.1)
                     if new_sl < be_price:
@@ -4398,8 +4402,9 @@ class EnhancedExitManager:
                         new_sl = trail_price
                         sl_changed = True
 
-            # Tier 2: 3.0R Profit -> Trail at 0.5 ATR distance (Sniper Lock)
-            if r_multiple > 3.0:
+            # Tier 2: 3.0R Profit -> Trail at 0.5 ATR distance (Sniper Lock) - 5R for Swing
+            ratchet_tier2 = 5.0 if is_swing else 3.0
+            if r_multiple > ratchet_tier2:
                 trail_dist = atr * 0.5
                 if trade_type == 'BUY':
                     trail_price = close_price - trail_dist
@@ -4414,11 +4419,12 @@ class EnhancedExitManager:
                         sl_changed = True
                         ProfessionalLogger.log(f"🔒 Ratchet Tightened (3R+): Stop moved to {new_sl:.2f}", "RISK", "MANAGER")
 
-            # TECHNICAL EXHAUSTION
+            # TECHNICAL EXHAUSTION: Much more lenient for Swing mode
             is_exhausted = False
-            if trade_type == 'BUY' and rsi > 75:
+            rsi_limit = 85 if is_swing else 75
+            if trade_type == 'BUY' and rsi > rsi_limit:
                 is_exhausted = True
-            elif trade_type == 'SELL' and rsi < 25:
+            elif trade_type == 'SELL' and rsi < (100 - rsi_limit):
                 is_exhausted = True
             
             if is_exhausted:
@@ -4435,8 +4441,8 @@ class EnhancedExitManager:
                         sl_changed = True
                         ProfessionalLogger.log(f"⚠️ RSI Exhaustion ({rsi:.1f}) - Tightening Stop on #{ticket}", "RISK", "MANAGER")
 
-            # TREND DEATH (ADX DROP)
-            if profit_points > 0 and adx < 20 and prev['adx'] > 20:
+            # TREND DEATH (ADX DROP): Only for scalp trades
+            if not is_swing and profit_points > 0 and adx < 20 and prev['adx'] > 20: 
                 ProfessionalLogger.log(f"💤 Trend Dying (ADX < 20) - Closing #{ticket} to free capital", "EXIT", "MANAGER")
                 if self.executor.close_position(ticket, symbol):
                     active_positions.pop(ticket, None)
