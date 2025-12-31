@@ -71,7 +71,7 @@ class Config:
     
     # Position sizing with enhanced scaling
     BASE_VOLUME = 0.01
-    MAX_VOLUME = 0.030
+    MAX_VOLUME = 0.03    # INCREASED for Swing Mode headroom (capped by broker anyway)
     MIN_VOLUME = 0.01
     VOLUME_STEP = 0.01
     
@@ -217,9 +217,11 @@ class Config:
     
     # Points-based Limits
     MIN_SL_DISTANCE_POINTS = 50
-    MAX_SL_DISTANCE_POINTS = 2500
+    MAX_SL_DISTANCE_POINTS = 2500      # Day/Peak Max SL Distance
+    SWING_MAX_SL_DISTANCE_POINTS = 10000 # Night/Swing Max SL Distance
     MIN_TP_DISTANCE_POINTS = 100
-    MAX_TP_DISTANCE_POINTS = 5000
+    MAX_TP_DISTANCE_POINTS = 5000      # Day/Peak Max TP Distance
+    SWING_MAX_TP_DISTANCE_POINTS = 15000 # Night/Swing Max TP Distance
     
     # Trailing Stop
     USE_TRAILING_STOP = True
@@ -3219,7 +3221,11 @@ class SignalQualityFilter:
             base_confidence *= 0.95
         
         # Adjust for time of day (higher threshold during low liquidity)
-        hour = market_context.get('hour', datetime.now().hour)
+        # Standardize to UTC for all session logic
+        now_utc = datetime.utcnow()
+        hour = now_utc.hour
+        day_of_week = now_utc.weekday()
+        
         if 0 <= hour < 7:  # Asian session
             base_confidence *= 1.1
         
@@ -3303,8 +3309,10 @@ class SignalQualityFilter:
         # 5. TIME-OF-DAY FILTER (ENHANCED)
         # ==========================================
         if Config.SESSION_AWARE_TRADING:
-            hour = market_context.get('hour', datetime.now().hour)
-            day_of_week = market_context.get('day_of_week', datetime.now().weekday())
+            # Consistent UTC usage
+            now_utc = datetime.utcnow()
+            hour = now_utc.hour
+            day_of_week = now_utc.weekday()
             
             # Check for market hours
             if Config.AVOID_ASIAN_SESSION and 0 <= hour < 7:
@@ -4968,21 +4976,25 @@ class SmartOrderExecutor:
             return None
         
         # Validate maximum distances
-        if sl > 0 and sl_distance > Config.MAX_SL_DISTANCE_POINTS:
+        current_max_sl = Config.SWING_MAX_SL_DISTANCE_POINTS if Config.is_swing_hour() else Config.MAX_SL_DISTANCE_POINTS
+        
+        if sl > 0 and sl_distance > current_max_sl:
             ProfessionalLogger.log(
                 f"Stop loss too far: {sl_distance:.1f} pts > "
-                f"maximum {Config.MAX_SL_DISTANCE_POINTS} pts",
+                f"maximum {current_max_sl} pts",
                 "ERROR", "EXECUTOR"
             )
             return None
         
-        if tp > 0 and tp_distance > Config.MAX_TP_DISTANCE_POINTS:
-            ProfessionalLogger.log(
-                f"Take profit too far: {tp_distance:.1f} pts > "
-                f"maximum {Config.MAX_TP_DISTANCE_POINTS} pts",
-                "ERROR", "EXECUTOR"
-            )
-            return None
+        if tp > 0:
+            current_max_tp = Config.SWING_MAX_TP_DISTANCE_POINTS if Config.is_swing_hour() else Config.MAX_TP_DISTANCE_POINTS
+            if tp_distance > current_max_tp:
+                ProfessionalLogger.log(
+                    f"Take profit too far: {tp_distance:.1f} pts > "
+                    f"maximum {current_max_tp} pts",
+                    "ERROR", "EXECUTOR"
+                )
+                return None
         
         # Validate Risk/Reward ratio
         if sl > 0 and tp > 0:
@@ -7006,11 +7018,21 @@ class EnhancedTradingEngine:
                 if mtf_res:
                     multi_tf_signal = mtf_res.get('consensus_signal')
                     multi_tf_conf = mtf_res.get('confidence', 0)
+                    multi_tf_alignment = mtf_res.get('alignment_score', 0)
                     trend_filter_passed = mtf_res.get('trend_filter_passed', True)
                     
                     if not trend_filter_passed:
-                         # Log logic handled in the class, just veto here
                          signal = None
+                    
+                    # SWING MODE: Enforce Signal Agreement (Silence Micro if contradictory)
+                    if Config.is_swing_hour() and Config.SWING_MODE_ENABLED:
+                        # Map STRONG_SELL(0) vs ML Signal(1)
+                        if multi_tf_signal == 0 and signal == 1:
+                            ProfessionalLogger.log("SWING MODE VETO: ML wants BUY but Macro is SELL. Trade BLOCKED.", "WARNING", "FILTER")
+                            signal = None
+                        elif multi_tf_signal == 1 and signal == 0:
+                            ProfessionalLogger.log("SWING MODE VETO: ML wants SELL but Macro is BUY. Trade BLOCKED.", "WARNING", "FILTER")
+                            signal = None
             
             # 6. Signal Valid?
             if signal is not None:
@@ -7023,6 +7045,7 @@ class EnhancedTradingEngine:
                 market_context = {
                     'regime': self.last_regime,
                     'multi_tf_signal': multi_tf_signal,
+                    'multi_tf_alignment': mtf_res.get('alignment_score', 0) if Config.MULTI_TIMEFRAME_ENABLED and 'mtf_res' in locals() else 0,
                     'existing_positions': list(self.active_positions.values())
                 }
                 is_valid, reason = self.signal_filter.validate_signal(signal, final_conf, dict_features, market_context)
@@ -7108,6 +7131,11 @@ def main():
     symbol_info = mt5.symbol_info(Config.SYMBOL)
     if symbol_info:
         ProfessionalLogger.log(f"Symbol info for {Config.SYMBOL}:", "INFO", "ENGINE")
+        # Log Current Mode Status
+        is_swing = Config.is_swing_hour()
+        mode_str = "🌙 SWING MODE" if is_swing else "☀️ PEAK MODE"
+        ProfessionalLogger.log(f"System Initialized in {mode_str} (UTC Hour: {datetime.utcnow().hour})", "SUCCESS", "ENGINE")
+        
         ProfessionalLogger.log(f"  Volume min: {getattr(symbol_info, 'volume_min', 'N/A')}", "INFO", "ENGINE")
         ProfessionalLogger.log(f"  Volume max: {getattr(symbol_info, 'volume_max', 'N/A')}", "INFO", "ENGINE")
         ProfessionalLogger.log(f"  Volume step: {getattr(symbol_info, 'volume_step', 'N/A')}", "INFO", "ENGINE")

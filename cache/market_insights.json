@@ -34,5 +34,14 @@
         ],
         "regime": "trending",
         "confidence": 1.0
+    },
+    {
+        "timestamp": "2025-12-31T18:46:06.669571",
+        "insights": [
+            "Market is in trending regime (confidence: 100%)",
+            "Consider trend-following strategies with wider stops"
+        ],
+        "regime": "trending",
+        "confidence": 1.0
     }
 ]
