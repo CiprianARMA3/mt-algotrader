@@ -3797,23 +3797,60 @@ class EnhancedEnsemble:
             weights=[1.0] * len(self.base_models)  # Will be adjusted by regime
         )
     
-    def _prepare_training_data(self, data):
-        """Prepare training data"""
+    def _load_institutional_context(self):
+        """Load historical institutional snapshots (DOM, Bayesian) for training augmentation"""
+        context_df = pd.DataFrame()
         try:
+            history_file = os.path.join(Config.CACHE_DIR, "market_data_history.json")
+            if os.path.exists(history_file):
+                with open(history_file, 'r') as f:
+                    history = json.load(f)
+                if history:
+                    context_df = pd.DataFrame(history)
+                    context_df['time'] = pd.to_datetime(context_df['timestamp'])
+                    # Aggregate by 15-minute chunks to align with bars if needed, or just nearest merge
+                    context_df = context_df.drop(columns=['timestamp'])
+        except Exception as e:
+            ProfessionalLogger.log(f"Institutional Load Error: {e}", "DEBUG", "LEARN")
+        return context_df
+
+    def _prepare_training_data(self, data):
+        """Prepare training data with institutional augmentation"""
+        try:
+            # 1. Base Features (Technical)
             df_features = self.feature_engine.calculate_features(data)
+            
+            # 2. Institutional Augmentation (Merging the "Memory")
+            inst_data = self._load_institutional_context()
+            if not inst_data.empty and 'time' in df_features.columns:
+                # Align memory with bars (Match the most recent institutional snapshot to each bar)
+                df_features = pd.merge_asof(
+                    df_features.sort_values('time'), 
+                    inst_data.sort_values('time'), 
+                    on='time', 
+                    direction='backward'
+                )
+                # Fill missing memory (for candles that existed before snapshots started)
+                df_features['dom_imbalance'] = df_features.get('dom_imbalance', 0).fillna(0)
+                df_features['regime_encoded'] = df_features.get('regime', 'unknown').map({'trending': 1, 'mean_reverting': 2, 'volatile': 3, 'stress': 4}).fillna(0)
+            
+            # 3. Labeling and Formatting
             df_labeled = self.feature_engine.create_labels(df_features, method='dynamic')
             df_labeled = df_labeled.dropna(subset=['label'])
             
             all_feature_cols = self.feature_engine.get_feature_columns()
-            self.trained_feature_columns = all_feature_cols
+            # Dynamic addition: if institutional columns exist, they become permanent features
+            for extra in ['dom_imbalance', 'regime_encoded', 'entropy', 'hurst']:
+                if extra in df_labeled.columns and extra not in all_feature_cols:
+                    all_feature_cols.append(extra)
             
+            self.trained_feature_columns = all_feature_cols
             X = df_labeled[all_feature_cols].copy().fillna(0).replace([np.inf, -np.inf], 0)
             
             for col in X.columns:
                 X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
                 
             y = df_labeled['label'].astype(int)
-            
             return X, y
 
         except Exception as e:
