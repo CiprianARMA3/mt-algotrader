@@ -1,0 +1,40 @@
+{
+  "trade_patterns": [],
+  "successful_entry_conditions": [],
+  "failed_entry_conditions": [
+    {
+      "timestamp": "2025-12-31T22:43:48.075941",
+      "sample_size": 8,
+      "avg_features": {
+        "rsi": 41.72859226455187,
+        "macd_hist": -0.5924683593248439,
+        "adx": 28.42643947580739,
+        "volatility": 0.0017563389590832155,
+        "hurst_exponent": 0.0,
+        "volume_ratio": 0.9664273110324655
+      }
+    },
+    {
+      "timestamp": "2025-12-31T22:43:49.188160",
+      "sample_size": 8,
+      "avg_features": {
+        "rsi": 41.72859226455187,
+        "macd_hist": -0.5924683593248439,
+        "adx": 28.42643947580739,
+        "volatility": 0.0017563389590832155,
+        "hurst_exponent": 0.0,
+        "volume_ratio": 0.9664273110324655
+      }
+    }
+  ],
+  "optimal_exit_timing": [],
+  "market_regime_performance": {},
+  "feature_importance": {
+    "rsi": 0.2788211383331575,
+    "macd_hist": 0.2813122463470282,
+    "adx": 0.31284490679416815,
+    "volatility": 0.34810417725123316,
+    "volume_ratio": 0.31803542919095174
+  },
+  "last_updated": "2025-12-31T22:43:49.188895"
+}

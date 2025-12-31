@@ -128,5 +128,135 @@
         "hurst_exponent": 0.6076859085123383,
         "rsi": 50,
         "volatility": 0.0015738499700677828
+    },
+    {
+        "timestamp": "2025-12-31T19:46:33.728912",
+        "price": 4320.59,
+        "regime": "trending",
+        "dom_imbalance": -0.9895071307175054,
+        "entropy": -5625.252524734513,
+        "hurst_exponent": 0.631283600112316,
+        "rsi": 50,
+        "volatility": 0.0014127983427155138
+    },
+    {
+        "timestamp": "2025-12-31T20:01:35.874979",
+        "price": 4320.97,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5639.840981487674,
+        "hurst_exponent": 0.5622657650126334,
+        "rsi": 50,
+        "volatility": 0.0013986699558645613
+    },
+    {
+        "timestamp": "2025-12-31T20:16:39.216064",
+        "price": 4318.77,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5689.227017018229,
+        "hurst_exponent": 0.5592399525243271,
+        "rsi": 50,
+        "volatility": 0.001393960216285882
+    },
+    {
+        "timestamp": "2025-12-31T20:31:43.392148",
+        "price": 4315.6,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5703.930049013166,
+        "hurst_exponent": 0.5456020400978233,
+        "rsi": 50,
+        "volatility": 0.001325917565069394
+    },
+    {
+        "timestamp": "2025-12-31T20:46:46.710890",
+        "price": 4313.45,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5682.301145424566,
+        "hurst_exponent": 0.5581779514028007,
+        "rsi": 50,
+        "volatility": 0.001356531619796753
+    },
+    {
+        "timestamp": "2025-12-31T21:01:48.599932",
+        "price": 4306.24,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5688.288409653742,
+        "hurst_exponent": 0.546854947684114,
+        "rsi": 50,
+        "volatility": 0.0011811143957106683
+    },
+    {
+        "timestamp": "2025-12-31T21:16:51.926508",
+        "price": 4315.05,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5682.301145424566,
+        "hurst_exponent": 0.5165452392880702,
+        "rsi": 50,
+        "volatility": 0.001137571202138537
+    },
+    {
+        "timestamp": "2025-12-31T21:31:54.777146",
+        "price": 4319.26,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5689.227017018229,
+        "hurst_exponent": 0.5380485358464098,
+        "rsi": 50,
+        "volatility": 0.0011317452919487635
+    },
+    {
+        "timestamp": "2025-12-31T21:46:55.716725",
+        "price": 4317.92,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5692.019872001277,
+        "hurst_exponent": 0.5990323694099162,
+        "rsi": 50,
+        "volatility": 0.001108440066032889
+    },
+    {
+        "timestamp": "2025-12-31T22:01:58.877338",
+        "price": 4313.26,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5703.930049013166,
+        "hurst_exponent": 0.6020456954973087,
+        "rsi": 50,
+        "volatility": 0.0009510719255882212
+    },
+    {
+        "timestamp": "2025-12-31T22:17:00.276472",
+        "price": 4311.55,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5731.532771252815,
+        "hurst_exponent": 0.5956872248966268,
+        "rsi": 50,
+        "volatility": 0.0009472546863723468
+    },
+    {
+        "timestamp": "2025-12-31T22:32:02.117003",
+        "price": 4311.39,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5751.369228790712,
+        "hurst_exponent": 0.6168168437339007,
+        "rsi": 50,
+        "volatility": 0.0009129192998669536
+    },
+    {
+        "timestamp": "2025-12-31T22:35:48.303419",
+        "price": 4312.84,
+        "regime": "trending",
+        "dom_imbalance": 0.0,
+        "entropy": -5731.985055675948,
+        "hurst_exponent": 0.6168168437339007,
+        "rsi": 50,
+        "volatility": 0.0009227420284437378
     }
 ]

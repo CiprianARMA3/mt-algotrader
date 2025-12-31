@@ -671,24 +671,27 @@ class TradeHistoryLearner:
         except Exception as e:
             ProfessionalLogger.log(f"Failed to save learning data: {e}", "ERROR", "LEARNER")
     
-    def fetch_past_trades_from_mt5(self, days_back=30):
-        """Fetch historical trades from MT5"""
+    def fetch_past_trades_from_mt5(self, days_back=None):
+        """Fetch historical trades from MT5 (defaults to all history)"""
         try:
-            from_date = datetime.now() - timedelta(days=days_back)
+            # If days_back is None, fetch everything since the year 2000
+            if days_back is None:
+                from_date = datetime(2000, 1, 1)
+            else:
+                from_date = datetime.now() - timedelta(days=days_back)
+                
             deals = mt5.history_deals_get(from_date, datetime.now())
             
             if deals is None or len(deals) == 0:
                 ProfessionalLogger.log("No historical deals found", "WARNING", "LEARNER")
                 return []
             
-            # Filter for our symbol and magic number
-            filtered_deals = [
-                deal for deal in deals 
-                if deal.symbol == Config.SYMBOL and deal.magic == Config.MAGIC_NUMBER
-            ]
+            # The user wants ALL trades, so we include everything regardless of symbol/magic
+            # This allows the bot to learn from manual trades and previous bot versions
+            all_deals = list(deals)
             
-            ProfessionalLogger.log(f"Fetched {len(filtered_deals)} past trades from MT5", "INFO", "LEARNER")
-            return filtered_deals
+            ProfessionalLogger.log(f"Fetched {len(all_deals)} total historical deals from MT5 account", "INFO", "LEARNER")
+            return all_deals
             
         except Exception as e:
             ProfessionalLogger.log(f"Error fetching past trades: {e}", "ERROR", "LEARNER")
@@ -751,8 +754,8 @@ class TradeHistoryLearner:
         """Main learning function - analyze all past trades"""
         ProfessionalLogger.log("🧠 Starting machine learning from past trades...", "LEARN", "LEARNER")
         
-        # Fetch past trades
-        past_deals = self.fetch_past_trades_from_mt5(days_back=90)
+        # Fetch past trades - Now fetches ALL historical deals
+        past_deals = self.fetch_past_trades_from_mt5()
         
         if len(past_deals) == 0:
             ProfessionalLogger.log("No past trades to learn from", "WARNING", "LEARNER")
@@ -4103,7 +4106,7 @@ class EnhancedEnsemble:
         # Fallback to ADX/Vol logic if signals are mixed
         if adx > 25:
             return 'trending'
-        elif volatility > Config.HIGH_VOL_THRESHOLD:
+        elif features.get('volatility', 0) > Config.HIGH_VOL_THRESHOLD:
             return 'volatile'
         else:
             return 'random_walk'
@@ -5813,6 +5816,7 @@ class EnhancedTradingEngine:
         self.signal_filter = SignalQualityFilter()
         self.entry_timing = SmartEntryTiming()
         self.parameter_optimizer = AdaptiveParameterOptimizer()
+        self.trade_learner = TradeHistoryLearner() # New: Full account history sync
         
         self.connected = False
         self.active_positions = {}
@@ -6426,7 +6430,24 @@ class EnhancedTradingEngine:
                         
                     # Trigger optimization if needed
                     if Config.PARAM_OPTIMIZATION_ENABLED:
-                         self.parameter_optimizer.update(profit)
+                        self.parameter_optimizer.update(profit)
+
+    def perform_initial_analysis(self):
+        """Perform initial statistical analysis and historical learning"""
+        ProfessionalLogger.log("Running comprehensive initial analysis...", "INFO", "ENGINE")
+        
+        # 1. Statistical Analysis
+        data = self.get_historical_data(bars=Config.LOOKBACK_BARS)
+        if data is not None:
+            self.initial_analysis = self.stat_analyzer.calculate_market_regime(data)
+            self._extract_market_insights(self.initial_analysis)
+        
+        # 2. Historical Trade Learning (Full Sync on Start)
+        try:
+            ProfessionalLogger.log("⚙️ Syncing full account history for learning...", "LEARN", "ENGINE")
+            self.trade_learner.learn_from_past_trades(self.feature_engine)
+        except Exception as e:
+            ProfessionalLogger.log(f"Failed historical sync: {e}", "WARNING", "ENGINE")
 
     def train_initial_model(self):
         """Train initial model with statistical analysis"""
@@ -6516,16 +6537,16 @@ class EnhancedTradingEngine:
             ProfessionalLogger.log(f"Signal Quality: {quality_score:.1f}/100 -> Confidence adjusted: {confidence:.2f} to {final_confidence:.2f}", "INFO", "ENGINE")
 
         # Adjust based on Trade History Learning
-        if hasattr(self, 'trade_memory') and hasattr(self.trade_memory, 'get_confidence_adjustment'):
-             # This assumes we implemented get_confidence_adjustment in TradeHistoryLearner and linked it
-             # Since it's a separate class instance, we need to access via self.model if it has reference
-             # Or if we added it to TradeMemory. Wait, TradeHistoryLearner is separate class. 
-             # I added it to Config as LEARNING_DATA_FILE but logic might be in a separate learner instance?
-             # Ah, TradeHistoryLearner definition is around line 600.
-             # I need to check if EnhancedTradingEngine has a 'learner' instance.
-             # Based on previous views, it likely does not.
-             # I'll rely on Signal Quality for now to avoid errors.
-             pass
+        if hasattr(self, 'trade_learner'):
+            try:
+                # Use the learned patterns to adjust confidence
+                learner_adjustment = self.trade_learner.get_confidence_adjustment(features)
+                if learner_adjustment != 1.0:
+                    old_conf = final_confidence
+                    final_confidence *= learner_adjustment
+                    ProfessionalLogger.log(f"🧠 AI Learning Adjustment: {old_conf:.2f} -> {final_confidence:.2f} (Factor: {learner_adjustment:.2f})", "LEARN", "ENGINE")
+            except Exception as e:
+                ProfessionalLogger.log(f"History learning adjustment error: {e}", "WARNING", "ENGINE")
 
         # ==========================================
         # 2. CALCULATE DYNAMIC STOP LOSS & TAKE PROFIT
@@ -6853,6 +6874,9 @@ class EnhancedTradingEngine:
         
         if not self.connect_mt5():
             return
+        
+        # New: Perform comprehensive initial analysis and historical learning
+        self.perform_initial_analysis()
         
         self.train_initial_model()
         
