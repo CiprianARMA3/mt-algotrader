@@ -3820,9 +3820,16 @@ class EnhancedEnsemble:
             # 1. Base Features (Technical)
             df_features = self.feature_engine.calculate_features(data)
             
+            # Ensure 'time' column is present and is datetime for the merge
+            if 'time' in df_features.columns:
+                df_features['time'] = pd.to_datetime(df_features['time'], unit='s' if df_features['time'].dtype != 'datetime64[ns]' else None)
+            
             # 2. Institutional Augmentation (Merging the "Memory")
             inst_data = self._load_institutional_context()
             if not inst_data.empty and 'time' in df_features.columns:
+                # Ensure institutional timestamps are also standardized
+                inst_data['time'] = pd.to_datetime(inst_data['time'])
+                
                 # Align memory with bars (Match the most recent institutional snapshot to each bar)
                 df_features = pd.merge_asof(
                     df_features.sort_values('time'), 
