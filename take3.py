@@ -259,7 +259,7 @@ class Config:
     
     # Session Hours (UTC)
     PEAK_VOLATILITY_START = 8  # London Open
-    PEAK_VOLATILITY_END = 20   # NY Close
+    PEAK_VOLATILITY_END = 17   # 17:00 UTC (End of London/NY Overlap)
     
     # Legacy session parameters (Required by Filters)
     AVOID_ASIAN_SESSION = False
@@ -3313,8 +3313,12 @@ class SignalQualityFilter:
             # Check for overlap preference
             if Config.PREFER_LONDON_NY_OVERLAP:
                 in_overlap = Config.LONDON_CLOSE_HOUR > hour >= Config.NY_OPEN_HOUR
-                if not in_overlap and confidence < 0.7:
-                    return False, f"Outside preferred overlap hours: {hour}:00"
+                if not in_overlap:
+                    # SWING MODE BYPASS: Allow trades outside overlap if Swing Mode is active
+                    if Config.SWING_MODE_ENABLED and Config.is_swing_hour():
+                        validation_results.append("✓ Swing Mode: Session overlap requirement bypassed")
+                    elif confidence < 0.7:
+                        return False, f"Outside preferred overlap hours: {hour}:00"
             
             # Monday first hour avoidance
             if Config.AVOID_MONDAY_FIRST_HOUR and day_of_week == 0 and hour < 1:
@@ -7080,7 +7084,10 @@ class EnhancedTradingEngine:
              # 4. Market Diagnostic Log
              if self.iteration % 12 == 0: # Approx 1 min (assuming 5s check interval)
                  account = mt5.account_info() # Re-fetch for fresh equity
-                 ProfessionalLogger.log(f"Heartbeat | Equity: {account.equity:.2f} | Time: {datetime.now().strftime('%H:%M:%S')}", "INFO", "ENGINE")
+                 heartbeat_msg = f"Heartbeat | Equity: {account.equity:.2f} | Time: {datetime.now().strftime('%H:%M:%S')}"
+                 if Config.SWING_MODE_ENABLED and Config.is_swing_hour():
+                     heartbeat_msg += " | 🌙 NIGHT SWING MODE: ACTIVE"
+                 ProfessionalLogger.log(heartbeat_msg, "INFO", "ENGINE")
 
              self.iteration += 1
 
