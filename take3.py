@@ -3838,10 +3838,19 @@ class EnhancedEnsemble:
                     direction='backward'
                 )
                 # Fill missing memory (for candles that existed before snapshots started)
-                df_features['dom_imbalance'] = df_features.get('dom_imbalance', 0).fillna(0)
+                if 'dom_imbalance' not in df_features.columns:
+                    df_features['dom_imbalance'] = 0.0
+                else:
+                    df_features['dom_imbalance'] = df_features['dom_imbalance'].fillna(0)
+                
                 # Note: 'regime' from snapshot vs potentially 'regime' from technicals
                 # Map snapshot regime to encoded number
-                df_features['regime_encoded'] = df_features.get('regime', 'unknown').map({'trending': 1, 'mean_reverting': 2, 'volatile': 3, 'stress': 4}).fillna(0)
+                if 'regime' in df_features.columns:
+                    df_features['regime_encoded'] = df_features['regime'].map({
+                        'trending': 1, 'mean_reverting': 2, 'volatile': 3, 'stress': 4
+                    }).fillna(0)
+                else:
+                    df_features['regime_encoded'] = 0.0
             
             # 3. Labeling and Formatting
             df_labeled = self.feature_engine.create_labels(df_features, method='dynamic')
