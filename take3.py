@@ -67,7 +67,7 @@ class Config:
     # TRADING INSTRUMENT SPECIFICATIONS
     # ==========================================
     SYMBOL = "XAUUSD"
-    TIMEFRAME = mt5.TIMEFRAME_M5
+    TIMEFRAME = mt5.TIMEFRAME_M15 # CHANGED: M15 as Primary for Medium-Term Precision
     
     # Position sizing with enhanced scaling
     BASE_VOLUME = 0.01
@@ -106,8 +106,8 @@ class Config:
     
     # Volatility Sizing (Smart Risk)
     VOLATILITY_SCALING_ENABLED = True
-    HIGH_VOL_THRESHOLD = 0.0025       # ~25 pips per 5min candle on Gold is high
-    LOW_VOL_THRESHOLD = 0.0008        # ~8 pips is low
+    HIGH_VOL_THRESHOLD = 0.0040       # ~40 pips per 15min candle on Gold
+    LOW_VOL_THRESHOLD = 0.0012        # ~12 pips is low
     HIGH_VOL_SIZE_MULTIPLIER = 0.5    # Half size in storms
     LOW_VOL_SIZE_MULTIPLIER = 1.5     # 1.5x size in calm
     
@@ -254,11 +254,11 @@ class Config:
     # ==========================================
     # TIME-BASED FILTERS
     # ==========================================
-    SESSION_AWARE_TRADING = False
+    SESSION_AWARE_TRADING = True  # Keep aware, but don't block
     
     # Trading Sessions (UTC times)
-    AVOID_ASIAN_SESSION = True  #true
-    PREFER_LONDON_NY_OVERLAP = True #true
+    AVOID_ASIAN_SESSION = False   # ENABLED 24/7 TRADING
+    PREFER_LONDON_NY_OVERLAP = True
     
     LONDON_OPEN_HOUR = 8
     LONDON_CLOSE_HOUR = 16
@@ -275,7 +275,7 @@ class Config:
     
     # Days of Week
     AVOID_MONDAY_FIRST_HOUR = True
-    AVOID_FRIDAY_LAST_HOURS = True
+    AVOID_FRIDAY_LAST_HOURS = False # ENABLED 24/7
     
     # ==========================================
     # ORDER EXECUTION
@@ -366,10 +366,12 @@ class Config:
     # MULTI-TIMEFRAME ANALYSIS
     # ==========================================
     MULTI_TIMEFRAME_ENABLED = True
-    TIMEFRAMES = ['M1', 'M5', 'M15', 'M30']
-    TIMEFRAME_WEIGHTS = [0.15, 0.35, 0.30, 0.20]
-    TIMEFRAME_ALIGNMENT_THRESHOLD = 0.30
-    REQUIRE_TIMEFRAME_ALIGNMENT = False
+    # PRECISION: Added H1 for robust trend filtering
+    TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1'] 
+    # Adjusted weights to focus on Medium Term (M15/M5)
+    TIMEFRAME_WEIGHTS = [0.05, 0.25, 0.50, 0.10, 0.10]
+    TIMEFRAME_ALIGNMENT_THRESHOLD = 0.40 # Enforce alignment
+    REQUIRE_TIMEFRAME_ALIGNMENT = True # Enforce strict precision
     
     LONG_TIMEFRAME_TREND_FILTER = True
     SHORT_TIMEFRAME_ENTRY = True
@@ -1145,6 +1147,123 @@ class MarketMicrostructureAnalyzer:
         return True
 
 # ==========================================
+# BAYESIAN REGIME DETECTOR
+# ==========================================
+class BayesianRegimeDetector:
+    """Probabilistic Change Point Detection"""
+    
+    def __init__(self, lookback=50):
+        self.lookback = lookback
+        self.returns_buffer = []
+        self.current_regime_prob = 0.5  # start neutral
+        self.last_switch_time = 0
+        
+    def detect_regime_switch(self, new_price):
+        """
+        Update probabilities and detect switch.
+        Returns: (is_switch, current_regime_type)
+        regime_type: 0 (Low Vol/Calm), 1 (High Vol/Stress)
+        """
+        if len(self.returns_buffer) == 0:
+            self.returns_buffer.append(new_price)
+            return False, 0
+            
+        # Calculate return
+        log_ret = np.log(new_price / self.returns_buffer[-1])
+        self.returns_buffer.append(new_price)
+        
+        if len(self.returns_buffer) > self.lookback:
+            self.returns_buffer.pop(0)
+            
+        # Need minimum data
+        if len(self.returns_buffer) < 20:
+            return False, 0
+            
+        # Calculate recent volatility (short window) vs historical (full window)
+        # Using a Bayes factor approach:
+        # H0: Volatility is Low (Normal)
+        # H1: Volatility is High (Shock)
+        
+        returns = np.diff(np.log(self.returns_buffer))
+        
+        full_std = np.std(returns) + 1e-9
+        short_window = returns[-10:]
+        short_std = np.std(short_window) + 1e-9
+        
+        # Likelihood ratio
+        # Likelihood of data under H1 (High Vol) / Likelihood under H0 (Low Vol)
+        # Assume High Vol is 2x Normal Vol
+        
+        lik_normal = stats.norm.pdf(returns[-1], loc=0, scale=full_std)
+        lik_shock = stats.norm.pdf(returns[-1], loc=0, scale=full_std * 2.5)
+        
+        # Avoid division by zero
+        if lik_normal == 0:
+            bayes_factor = 100 # Strong evidence for shock
+        else:
+            bayes_factor = lik_shock / lik_normal
+            
+        # Update prior (simple recursive update)
+        # prior = current_regime_prob
+        # posterior = (likelihood * prior) / evidence
+        # We simplify to a "Shock Probability" score
+        
+        decay = 0.85 # Memory decay
+        self.current_regime_prob = (self.current_regime_prob * decay) + (1 - decay) * (1 if bayes_factor > 1.5 else 0)
+        
+        is_high_vol = self.current_regime_prob > 0.6
+        
+        return is_high_vol, self.current_regime_prob
+
+# ==========================================
+# REINFORCEMENT LEARNING DATA COLLECTOR
+# ==========================================
+class ReinforcementDataCollector:
+    """Collects State-Action-Reward tuples for future RL training"""
+    
+    def __init__(self):
+        self.file_path = Config.LEARNING_DATA_FILE
+        self.pending_experiences = {} # ticket -> {state, action}
+        self.experiences = []
+        self._load()
+        
+    def _load(self):
+        if os.path.exists(self.file_path):
+            try:
+                with open(self.file_path, 'r') as f:
+                    self.experiences = json.load(f)
+            except:
+                self.experiences = []
+
+    def record_entry(self, ticket, state, action):
+        """Record the state and action at trade entry"""
+        self.pending_experiences[ticket] = {
+            'state': state,
+            'action': action,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+    def complete_experience(self, ticket, result_metrics):
+        """Complete the experience with reduction reward (PnL/Sharpe)"""
+        if ticket in self.pending_experiences:
+            exp = self.pending_experiences.pop(ticket)
+            exp['reward'] = result_metrics
+            self.experiences.append(exp)
+            
+            # Keep recent 10k
+            if len(self.experiences) > 10000:
+                self.experiences = self.experiences[-10000:]
+                
+            self._save()
+            
+    def _save(self):
+        try:
+            with open(self.file_path, 'w') as f:
+                json.dump(self.experiences, f)
+        except Exception as e:
+            ProfessionalLogger.log(f"RL Save Error: {e}", "ERROR", "MEMORY")
+
+# ==========================================
 # ADVANCED STATISTICAL ANALYZER
 # ==========================================
 class AdvancedStatisticalAnalyzer:
@@ -1273,14 +1392,13 @@ class AdvancedStatisticalAnalyzer:
             beta = np.linalg.lstsq(X, delta_series, rcond=None)[0][1]
             
             if beta >= 0:
-                return float('inf')
+                return 1000.0  # Cap at large number instead of inf
             
             half_life = -np.log(2) / beta
-            return max(0, half_life)
+            return min(1000.0, max(0, half_life))
         except:
             return 0
     
-    @staticmethod
     @staticmethod
     def calculate_hurst_exponent(prices, method='rs'):
         """Calculate Hurst exponent for market efficiency analysis - JIT OPTIMIZED"""
@@ -1560,6 +1678,22 @@ class AdvancedStatisticalAnalyzer:
         if autocorr > 0.1:
             regime_scores["trending"] += 1
         
+        # Check for linear trend strength (R-squared)
+        try:
+            # Simple linear regression on log prices
+            y = np.log(data['close'].values)
+            x = np.arange(len(y))
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+            r_squared = r_value**2
+            
+            if r_squared > 0.8 and abs(slope) > 0.0001:
+                regime_scores["trending"] += 3 # Strong linear trend overrides Hurst
+            elif r_squared > 0.6:
+                regime_scores["trending"] += 1
+        except:
+            r_squared = 0
+            slope = 0
+
         if hurst < 0.4:
             regime_scores["mean_reverting"] += 2
         elif hurst < 0.45:
@@ -1572,7 +1706,7 @@ class AdvancedStatisticalAnalyzer:
         if volatility > vol_threshold * 1.5:
             regime_scores["volatile"] += 2
         
-        if 0.45 <= hurst <= 0.55 and abs(autocorr) < 0.05:
+        if 0.45 <= hurst <= 0.55 and abs(autocorr) < 0.05 and r_squared < 0.6:
             regime_scores["random_walk"] += 2
         
         best_regime = max(regime_scores, key=regime_scores.get)
@@ -1746,25 +1880,35 @@ class ProfessionalRiskMetrics:
         
         metrics['skewness'] = skew(returns)
         metrics['kurtosis'] = kurtosis(returns)
-        metrics['tail_ratio'] = abs(np.mean(returns[returns < np.percentile(returns, 5)])) / \
-                                abs(np.mean(returns[returns > np.percentile(returns, 95)])) \
-                                if len(returns[returns > np.percentile(returns, 95)]) > 0 else float('inf')
+        # Epsilon for safe division to avoid infinity but allow high values
+        EPSILON = 1e-6
         
-        if metrics['max_drawdown'] > 0:
-            metrics['calmar'] = np.mean(returns) * 252 / metrics['max_drawdown']
-            metrics['recovery_factor'] = np.sum(returns) / metrics['max_drawdown'] if metrics['max_drawdown'] > 0 else float('inf')
+        if len(returns) > 0:
+             denom = abs(np.mean(returns[returns > np.percentile(returns, 95)])) if len(returns[returns > np.percentile(returns, 95)]) > 0 else 0
+             if denom > EPSILON:
+                 metrics['tail_ratio'] = abs(np.mean(returns[returns < np.percentile(returns, 5)])) / denom
+             else:
+                 # Use epsilon proxy for denominator
+                 metrics['tail_ratio'] = abs(np.mean(returns[returns < np.percentile(returns, 5)])) / EPSILON
         else:
-            metrics['calmar'] = float('inf')
-            metrics['recovery_factor'] = float('inf')
+             metrics['tail_ratio'] = 0.0
+
+        # Use effective max_drawdown (min EPSILON) to allow calculation even if 0
+        effective_mdd = max(metrics['max_drawdown'], EPSILON)
+        metrics['calmar'] = np.mean(returns) * 252 / effective_mdd
+        metrics['recovery_factor'] = np.sum(returns) / effective_mdd
         
         threshold = 0
         gains = returns[returns > threshold] - threshold
         losses = threshold - returns[returns <= threshold]
         
-        if len(losses) > 0 and np.sum(losses) > 0:
-            metrics['omega'] = np.sum(gains) / np.sum(losses)
+        loss_sum = np.sum(losses) if len(losses) > 0 else 0
+        effective_loss_sum = max(loss_sum, EPSILON)
+        
+        if len(returns) > 0:
+             metrics['omega'] = np.sum(gains) / effective_loss_sum
         else:
-            metrics['omega'] = float('inf')
+             metrics['omega'] = 0.0
         
         if prices is not None and len(prices) > 14:
             squared_drawdowns = drawdown ** 2
@@ -1832,6 +1976,106 @@ class ProfessionalRiskMetrics:
         }
 
 # ==========================================
+# LEVEL 2 ORDER FLOW ANALYZER
+# ==========================================
+class OrderFlowAnalyzer:
+    """Institutional Grade Level 2 Interpretation"""
+    
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.last_book_time = 0
+        self.cache = {}
+        
+    def get_order_book_imbalance(self, depth=10):
+        """
+        Calculate Bid-Ask Volume Imbalance
+        Range: -1.0 (Full Bearish) to 1.0 (Full Bullish)
+        """
+        try:
+            book = mt5.market_book_get(self.symbol)
+            if not book or len(book) == 0:
+                return 0
+                
+            # Separate Bids and Asks
+            # In MT5 Book: type 1 = Sell (Ask), type 2 = Buy (Bid)
+            asks = [item.volume for item in book if item.type == 1]
+            bids = [item.volume for item in book if item.type == 2]
+            
+            # Limit depth
+            asks = asks[:depth]
+            bids = bids[:depth]
+            
+            total_ask_vol = sum(asks)
+            total_bid_vol = sum(bids)
+            total_vol = total_ask_vol + total_bid_vol
+            
+            if total_vol == 0:
+                return 0
+                
+            # Imbalance = (BidVol - AskVol) / (BidVol + AskVol)
+            imbalance = (total_bid_vol - total_ask_vol) / total_vol
+            return imbalance
+            
+        except Exception as e:
+            return 0
+
+    def detect_liquidity_walls(self, current_price, threshold_factor=2.5):
+        """Detect abnormally large limit orders (Liquidity Walls)"""
+        walls = {'sell_wall': None, 'buy_wall': None}
+        try:
+            book = mt5.market_book_get(self.symbol)
+            if not book:
+                return walls
+                
+            volumes = [item.volume for item in book]
+            avg_vol = np.mean(volumes) if volumes else 0
+            
+            # Threshold for a "Wall"
+            wall_threshold = avg_vol * threshold_factor
+            
+            # Find nearest walls
+            best_ask = 999999
+            best_bid = 0
+            
+            for item in book:
+                if item.volume > wall_threshold:
+                    if item.type == 1: # Sell Wall (Ask)
+                        # We want the lowest price sell wall (closest to price)
+                        if item.price < best_ask and item.price > current_price:
+                            best_ask = item.price
+                            walls['sell_wall'] = {'price': item.price, 'vol': item.volume}
+                    elif item.type == 2: # Buy Wall (Bid)
+                        # We want the highest price buy wall (closest to price)
+                        if item.price > best_bid and item.price < current_price:
+                            best_bid = item.price
+                            walls['buy_wall'] = {'price': item.price, 'vol': item.volume}
+                            
+            return walls
+        except:
+            return walls
+
+    def analyze_flow(self):
+        """Get comprehensive flow analysis"""
+        # Subscribe to book if needed (MT5 requires explicit subscription for some assets)
+        mt5.market_book_add(self.symbol)
+        
+        imbalance = self.get_order_book_imbalance()
+        
+        # Get current price proxy
+        tick = mt5.symbol_info_tick(self.symbol)
+        price = tick.ask if tick else 0
+        
+        walls = self.detect_liquidity_walls(price)
+        
+        mt5.market_book_release(self.symbol)
+        
+        return {
+            'imbalance': imbalance,
+            'walls': walls,
+            'timestamp': datetime.now().isoformat()
+        }
+
+# ==========================================
 # ENHANCED FEATURE ENGINEERING
 # ==========================================
 class EnhancedFeatureEngine:
@@ -1871,25 +2115,54 @@ class EnhancedFeatureEngine:
     def _calculate_shannon_entropy(self, x):
         """Calculate Shannon Entropy to measure market noise"""
         try:
+             # Ensure we are working with numpy array or safe indexing
+            if hasattr(x, 'values'):
+                vals = x.values
+            else:
+                vals = np.array(x)
+            
+            # Check cache first
+            if self.smart_cache:
+                # Use safe indexing on array
+                last_val = vals[-1] if len(vals) > 0 else 0
+                cache_key = f"entropy_{len(vals)}_{last_val}"
+                cached = self.smart_cache.get(cache_key, ttl=300) # 5 min cache
+                if cached is not None:
+                    return cached
+
             # Normalized probability distribution
-            hist, _ = np.histogram(x, bins='doane', density=True)
+            hist, _ = np.histogram(vals, bins='doane', density=True)
             hist = hist[hist > 0]
-            return -np.sum(hist * np.log(hist))
+            val = -np.sum(hist * np.log(hist))
+            
+            # Cache result
+            if self.smart_cache:
+                self.smart_cache.set(cache_key, val)
+                
+            return val
         except:
             return 0
 
     def _calculate_hurst(self, ts):
         """Calculate Hurst Exponent to measure trend persistence - Cached & JIT Optimized"""
-        # Check cache first
-        if self.smart_cache:
-            cache_key = f"hurst_{len(ts)}_{ts[-1] if len(ts)>0 else 0}"
-            cached = self.smart_cache.get(cache_key, ttl=Config.CACHE_TTL_HURST)
-            if cached is not None:
-                return cached
-        
         try:
+            # Ensure we are working with numpy array or safe indexing
+            if hasattr(ts, 'values'):
+                ts_vals = ts.values
+            else:
+                ts_vals = np.array(ts)
+                
+            # Check cache first
+            if self.smart_cache:
+                # Use safe indexing on array
+                last_val = ts_vals[-1] if len(ts_vals) > 0 else 0
+                cache_key = f"hurst_{len(ts_vals)}_{last_val}"
+                cached = self.smart_cache.get(cache_key, ttl=Config.CACHE_TTL_HURST)
+                if cached is not None:
+                    return cached
+        
             # Use JIT optimized version from AdvancedStatisticalAnalyzer
-            val = AdvancedStatisticalAnalyzer.calculate_hurst_exponent(ts)
+            val = AdvancedStatisticalAnalyzer.calculate_hurst_exponent(ts_vals)
             
             # Cache result
             if self.smart_cache:
@@ -1901,25 +2174,34 @@ class EnhancedFeatureEngine:
             
     def _calculate_garch_volatility(self, returns):
         """Forecast Volatility using GARCH(1,1) - Cached"""
-        # Check cache first
-        if self.smart_cache:
-            cache_key = f"garch_{len(returns)}_{returns[-1] if len(returns)>0 else 0}"
-            cached = self.smart_cache.get(cache_key, ttl=Config.CACHE_TTL_GARCH)
-            if cached is not None:
-                return cached
-                
         try:
-            # Use AdvancedStatisticalAnalyzer which handles this
-             val = AdvancedStatisticalAnalyzer.calculate_garch_volatility(returns)
+            # Ensure we are working with numpy array or safe indexing
+            if hasattr(returns, 'values'):
+                ret_vals = returns.values
+            else:
+                ret_vals = np.array(returns)
+                
+            # Check cache first
+            if self.smart_cache:
+                # Use safe indexing on array
+                last_val = ret_vals[-1] if len(ret_vals) > 0 else 0
+                cache_key = f"garch_{len(ret_vals)}_{last_val}"
+                cached = self.smart_cache.get(cache_key, ttl=Config.CACHE_TTL_GARCH)
+                if cached is not None:
+                    return cached
+                
+            # Use AdvancedStatisticalAnalyzer
+            val = AdvancedStatisticalAnalyzer.calculate_garch_volatility(ret_vals)
              
-             # Cache result
-             if self.smart_cache:
+            # Cache result
+            if self.smart_cache:
                  self.smart_cache.set(cache_key, val)
                  
-             return val
-        except:
+            return val
+        except Exception as e:
              # Fallback to simple std
-             return returns.std() if len(returns) > 0 else 0.01
+             # ProfessionalLogger.log(f"GARCH Error: {e}", "DEBUG", "FEATURE_ENGINE") # Optional debug
+             return np.std(returns) if len(returns) > 0 else 0.01
              
     def _add_microstructure_features(self, df):
         """Add microstructure analysis features"""
@@ -1945,9 +2227,19 @@ class EnhancedFeatureEngine:
         # Basic price features
         # Vectorized calculation (already efficient in pandas/numpy)
         df['returns'] = df['close'].pct_change()
-        # Use numpy for log returns for slight speedup
-        close_np = df['close'].values
-        df['log_returns'] = np.concatenate(([np.nan], np.diff(np.log(close_np))))
+        
+        # Safe log returns calculation
+        close_np = df['close'].values.astype(float)
+        # Handle zeros or negative values by replacing with NaN before log
+        close_safe = np.where(close_np > 0, close_np, np.nan)
+        log_vals = np.log(close_safe)
+        # Forward fill any NaNs created from invalid prices (though rare in close prices)
+        if np.isnan(log_vals).any():
+            # Minimal pandas fallback for complex filling if needed, or just 0
+             mask = np.isnan(log_vals)
+             log_vals[mask] = 0 # Fallback to 0 log implies 1.0 price, usually acceptable for diff
+             
+        df['log_returns'] = np.concatenate(([np.nan], np.diff(log_vals)))
         
         df['hl_ratio'] = (df['high'] - df['low']) / df['close']
         df['co_ratio'] = (df['close'] - df['open']) / df['open']
@@ -1959,17 +2251,17 @@ class EnhancedFeatureEngine:
             ma_periods.append(Config.TREND_MA)
             
         for period in ma_periods:
-            df[f'sma_{period}'] = df['close'].rolling(period).mean()
-            df[f'ema_{period}'] = df['close'].ewm(span=period, adjust=False).mean()
-            
-            # Vectorized deviation calculation
-            sma = df[f'sma_{period}']
-            # Avoid division by zero with small epsilon or replace
-            df[f'price_to_sma_{period}'] = (df['close'] / sma.replace(0, np.nan)) - 1
-            df[f'price_to_sma_{period}'] = df[f'price_to_sma_{period}'].fillna(0)
-            
-            if len(df) > period * 2:
-                try:
+            try:
+                df[f'sma_{period}'] = df['close'].rolling(period).mean()
+                df[f'ema_{period}'] = df['close'].ewm(span=period, adjust=False).mean()
+                
+                # Vectorized deviation calculation
+                sma = df[f'sma_{period}']
+                # Avoid division by zero with small epsilon or replace
+                df[f'price_to_sma_{period}'] = (df['close'] / sma.replace(0, np.nan)) - 1
+                df[f'price_to_sma_{period}'] = df[f'price_to_sma_{period}'].fillna(0)
+                
+                if len(df) > period * 2:
                     price_deviation = df['close'] - df[f'sma_{period}']
                     rolling_mean = price_deviation.rolling(period).mean()
                     rolling_std = price_deviation.rolling(period).std()
@@ -1977,26 +2269,34 @@ class EnhancedFeatureEngine:
                     # Vectorized Z-score
                     z_score = (price_deviation - rolling_mean) / rolling_std.replace(0, np.nan)
                     df[f'price_deviation_{period}_z'] = z_score.fillna(0)
-                except:
-                    df[f'price_deviation_{period}_z'] = 0
+            except Exception as e:
+                ProfessionalLogger.log(f"Error calculating MA features for period {period}: {str(e)}", "WARNING", "FEATURE_ENGINE")
+                df[f'price_deviation_{period}_z'] = 0
+                df[f'price_to_sma_{period}'] = 0
         
         # Volatility features
         # Vectorized TR calculation
-        high = df['high'].values
-        low = df['low'].values
-        close = df['close'].values
-        close_shift = np.roll(close, 1)
-        close_shift[0] = close[0] # Handle first element
-        
-        tr1 = high - low
-        tr2 = np.abs(high - close_shift)
-        tr3 = np.abs(low - close_shift)
-        
-        df['tr'] = np.maximum(tr1, np.maximum(tr2, tr3))
-        
-        df['atr'] = df['tr'].rolling(Config.ATR_PERIOD).mean()
-        df['atr_percent'] = df['atr'] / df['close'].replace(0, 1)
-        df['volatility'] = df['returns'].rolling(20).std()
+        try:
+            high = df['high'].values
+            low = df['low'].values
+            close = df['close'].values
+            close_shift = np.roll(close, 1)
+            close_shift[0] = close[0] # Handle first element
+            
+            tr1 = high - low
+            tr2 = np.abs(high - close_shift)
+            tr3 = np.abs(low - close_shift)
+            
+            df['tr'] = np.maximum(tr1, np.maximum(tr2, tr3))
+            
+            df['atr'] = df['tr'].rolling(Config.ATR_PERIOD).mean()
+            df['atr_percent'] = df['atr'] / df['close'].replace(0, 1)
+            df['volatility'] = df['returns'].rolling(20).std()
+        except Exception as e:
+            ProfessionalLogger.log(f"Error calculating volatility features: {str(e)}", "ERROR", "FEATURE_ENGINE")
+            df['atr'] = 0.001 * df['close']
+            df['atr_percent'] = 0.001
+            df['volatility'] = 0.01
         
         # Feature: Realized Volatility (Annualized)
         rolling_std_5 = df['returns'].rolling(5).std()
@@ -4791,7 +5091,8 @@ class MultiTimeframeAnalyser:
             'M1': mt5.TIMEFRAME_M1,
             'M5': mt5.TIMEFRAME_M5,
             'M15': mt5.TIMEFRAME_M15,
-            'M30': mt5.TIMEFRAME_M30
+            'M30': mt5.TIMEFRAME_M30,
+            'H1': mt5.TIMEFRAME_H1
         }
         
         self.analysis_cache = {}
@@ -4915,8 +5216,8 @@ class MultiTimeframeAnalyser:
         weights = []
         
         # Calculate Market 'Speed' (Volatility/Trend Strength) for Dynamic Weighting
-        # We use M5 as the baseline for market speed
-        market_speed_metrics = multi_tf_data.get('M5', None)
+        # We use M15 as the baseline for market speed (more relevant for medium term)
+        market_speed_metrics = multi_tf_data.get('M15', None)
         is_fast_market = False
         is_slow_market = False
         
@@ -4940,18 +5241,18 @@ class MultiTimeframeAnalyser:
                 pass
 
         # Define Dynamic Weights
-        # Order: M1, M5, M15, M30 (Assumes TIMEFRAMES list order)
+        # Order: M1, M5, M15, M30, H1 (Aligned with Config.TIMEFRAMES)
         if is_fast_market:
-            # Fast market: Prioritize M1/M5 for speed
-            current_weights = [0.40, 0.40, 0.15, 0.05]
+            # Fast market: M15/M5 still lead, but M5 gets a boost for timing
+            current_weights = [0.15, 0.35, 0.35, 0.10, 0.05]
             regime_note = "FAST (High Vol)"
         elif is_slow_market:
-            # Slow market: Prioritize M15/M30 for stability
-            current_weights = [0.05, 0.15, 0.40, 0.40]
+            # Slow market: Extreme stability focus (M1 almost ignored)
+            current_weights = [0.02, 0.08, 0.40, 0.30, 0.20]
             regime_note = "SLOW (Low Vol)"
         else:
-            # Normal market: Balanced
-            current_weights = [0.15, 0.35, 0.30, 0.20]
+            # Normal market: Balanced towards M15 (50% weight)
+            current_weights = [0.05, 0.25, 0.50, 0.10, 0.10]
             regime_note = "NORMAL"
 
         ProfessionalLogger.log(f"Dynamic TF Weights: {regime_note} | Weights: {current_weights}", "INFO", "MULTI_TF")
@@ -4997,15 +5298,20 @@ class MultiTimeframeAnalyser:
             total_pairs = len(signal_directions) * (len(signal_directions) - 1) / 2
             analysis['alignment_score'] = agreement / total_pairs if total_pairs > 0 else 0
         
-        if 'M30' in analysis['timeframes']:
-            m30_trend = analysis['timeframes']['M30']['features']['trend_direction']
+        # Trend Filter Code (Checks H1 or M30)
+        filter_tf = 'H1' if 'H1' in analysis['timeframes'] else 'M30'
+        
+        if filter_tf in analysis['timeframes']:
+            trend_dir = analysis['timeframes'][filter_tf]['features']['trend_direction']
             if self.config.LONG_TIMEFRAME_TREND_FILTER:
-                if analysis['consensus_signal'] == 1 and m30_trend < 0:
-                    analysis['trend_filter'] = -1
-                elif analysis['consensus_signal'] == 0 and m30_trend > 0:
-                    analysis['trend_filter'] = -1
+                # Strong Filter: Signal must match Macro Trend or Macro Trend must be neutral
+                # If Signal is Buy (1), Macro Trend cannot be Sell (-1)
+                if analysis['consensus_signal'] == 1 and trend_dir < 0:
+                    analysis['trend_filter'] = -1 # Veto
+                elif analysis['consensus_signal'] == 0 and trend_dir > 0:
+                    analysis['trend_filter'] = -1 # Veto
                 else:
-                    analysis['trend_filter'] = 1
+                    analysis['trend_filter'] = 1 # Pass
         
         # Use Config parameters for confidence calculation
         alignment_threshold = self.config.TIMEFRAME_ALIGNMENT_THRESHOLD
@@ -5349,7 +5655,11 @@ class EnhancedTradingEngine:
     
     def __init__(self):
         self.trade_memory = ProfessionalTradeMemory()
-        self.feature_engine = EnhancedFeatureEngine()  # Using enhanced version
+        self.feature_engine = EnhancedFeatureEngine()
+        self.order_flow = OrderFlowAnalyzer(Config.SYMBOL) # New: Level 2 Analysis
+        self.bayes_detector = BayesianRegimeDetector() # New: Probabilistic Regime Check
+        self.rl_collector = ReinforcementDataCollector() # New: RL Data Collector
+
         self.order_executor = SmartOrderExecutor()
         self.stat_analyzer = AdvancedStatisticalAnalyzer()
         self.risk_metrics = ProfessionalRiskMetrics()
@@ -5913,7 +6223,41 @@ class EnhancedTradingEngine:
                 ProfessionalLogger.log(f"  {opt['timestamp']}: Score={opt['score']:.3f}", "PERFORMANCE", "ENGINE")
         
         ProfessionalLogger.log("=" * 70, "PERFORMANCE", "ENGINE")
-    
+
+    def check_closed_positions(self):
+        """Check for closed positions and update RL/Memory"""
+        if not self.active_positions:
+            return
+            
+        for ticket in list(self.active_positions.keys()):
+            # Check if position still exists
+            pos = mt5.positions_get(ticket=ticket)
+            if pos is None or len(pos) == 0:
+                # Position closed
+                trade_data = self.active_positions.pop(ticket)
+                ProfessionalLogger.log(f"Trade #{ticket} ({trade_data['type']}) CLOSED", "TRADE", "ENGINE")
+                
+                # Get PnL from history
+                deals = mt5.history_deals_get(position=ticket)
+                if deals:
+                    profit = sum([d.profit + d.swap + d.commission for d in deals])
+                    ProfessionalLogger.log(f"  PnL: ${profit:.2f}", "TRADE", "ENGINE")
+                    
+                    # Update RL Collector
+                    if hasattr(self, 'rl_collector'):
+                        self.rl_collector.complete_experience(ticket, profit)
+                    
+                    # Update Trade Memory
+                    if hasattr(self, 'trade_memory'):
+                        trade_data['status'] = 'closed'
+                        trade_data['profit'] = profit
+                        trade_data['close_time'] = datetime.now().isoformat()
+                        self.trade_memory.add_trade(trade_data)
+                        
+                    # Trigger optimization if needed
+                    if Config.PARAM_OPTIMIZATION_ENABLED:
+                         self.parameter_optimizer.update(profit)
+
     def train_initial_model(self):
         """Train initial model with statistical analysis"""
         ProfessionalLogger.log(f"Loading deep history ({Config.LOOKBACK_BARS} bars) for initial training...", "INFO", "ENGINE")
@@ -6234,37 +6578,42 @@ class EnhancedTradingEngine:
         )
         
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            # Record trade in memory
-            trade_data = {
-                'ticket': result.order,
-                'symbol': Config.SYMBOL,
-                'type': trade_type_str,
-                'signal': signal,
-                'volume': volume,
-                'open_price': entry_price,
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'sl_points': sl_distance_points,
-                'tp_points': tp_distance_points,
-                'open_time': int(time.time()),
-                'confidence': confidence,
-                'features': features,
-                'model_details': model_details,
-                'status': 'open',
-                'mfe_points': 0,
-                'mae_points': 0
-            }
-            
-            self.active_positions[result.order] = trade_data
-            self._save_engine_state()
-            
-            ProfessionalLogger.log(
+             ProfessionalLogger.log(f"Trade executed: #{result.order}", "SUCCESS", "ENGINE")
+             
+             # Record for RL (State + Action)
+             if hasattr(self, 'rl_collector'):
+                 rl_state = {
+                     'volatility': features.get('volatility', 0),
+                     'rsi': features.get('rsi', 50),
+                     'trend': features.get('trend_direction', 0),
+                     'spread': tick.ask - tick.bid,
+                     'regime': self.last_regime
+                 }
+                 rl_action = {'signal': signal, 'confidence': final_confidence}
+                 self.rl_collector.record_entry(result.order, rl_state, rl_action)
+             
+             # Track Position
+             self.active_positions[result.order] = {
+                 'ticket': result.order,
+                 'type': trade_type_str,
+                 'open_price': entry_price,
+                 'sl': stop_loss,
+                 'tp': take_profit,
+                 'open_time': datetime.now().isoformat(),
+                 'confidence': final_confidence,
+                 'pnl': 0,
+                 'max_runge_profit': 0
+             }
+             self._save_engine_state()
+             
+             ProfessionalLogger.log(
                 f"✅ Trade Opened: #{result.order} | {trade_type_str} {volume:.3f} @ {entry_price:.5f} | "
-                f"Conf: {confidence:.0%} | RR: {rr_ratio:.2f}",
+                f"Conf: {confidence:.0%} | RR: {(tp_distance/sl_distance):.2f}",
                 "SUCCESS", "ENGINE"
             )
         else:
-            ProfessionalLogger.log("Trade execution failed", "ERROR", "ENGINE")
+             ProfessionalLogger.log("Order execution failed", "ERROR", "ENGINE")
+             ProfessionalLogger.log("Order execution failed", "ERROR", "ENGINE")
             
     def _calculate_atr(self, df, period=14):
         """Helper method to calculate ATR"""
@@ -6377,424 +6726,47 @@ class EnhancedTradingEngine:
         self.run_enhanced_live_trading()
 
     def run_enhanced_live_trading(self):
-        """Enhanced live trading with all new features"""
+        """Enhanced live trading with all new features - EVENT DRIVEN"""
         ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
-        ProfessionalLogger.log("STARTING ENHANCED LIVE TRADING", "TRADE", "ENGINE")
+        ProfessionalLogger.log("STARTING EVENT-DRIVEN TRADING CORE", "TRADE", "ENGINE")
+        ProfessionalLogger.log(f"Latency Target: <10ms", "INFO", "ENGINE")
         ProfessionalLogger.log(f"Dynamic Barriers: {'ENABLED' if Config.USE_DYNAMIC_BARRIERS else 'DISABLED'}", "INFO", "ENGINE")
-        ProfessionalLogger.log(f"Entry Confirmation: {'ENABLED' if Config.USE_CONFIRMATION_ENTRY else 'DISABLED'}", "INFO", "ENGINE")
-        ProfessionalLogger.log(f"Parameter Optimization: {'ENABLED' if Config.PARAM_OPTIMIZATION_ENABLED else 'DISABLED'}", "INFO", "ENGINE")
+        ProfessionalLogger.log(f"24/7 Precision: ENABLED", "INFO", "ENGINE")
         ProfessionalLogger.log("=" * 70, "INFO", "ENGINE")
         
         self.running = True
+        self.last_tick_time = 0
+        self.last_periodic_check = time.time()
+        
+        # Pre-allocate for speed
+        self.required_lookback = max(500, Config.TREND_MA * 2)
+        
         try:
             while self.running:
-                self.run_periodic_tasks()
-                
-                required_lookback = max(500, Config.TREND_MA * 2) 
-                
-                rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, required_lookback)
-                if rates is None or len(rates) < Config.TREND_MA + 10:
-                    ProfessionalLogger.log("Failed to get sufficient rates, retrying...", "WARNING", "ENGINE")
-                    time.sleep(10) # Blocking sleep here is acceptable as we can't proceed without data
+                # 1. High-Frequency Tick Check (Microsecond precison potential)
+                tick = mt5.symbol_info_tick(Config.SYMBOL)
+                if tick is None:
+                    time.sleep(0.1)
                     continue
-                
-                # ==========================================
-                # DAILY LOSS LIMIT CHECK (PROFESSIONAL RISK)
-                # ==========================================
-                account_info = mt5.account_info()
-                if account_info:
-                    current_equity = account_info.equity
-                    # Use stored starting equity or initialize it
-                    if not hasattr(self, 'daily_start_equity') or self.daily_start_equity == 0:
-                        self.daily_start_equity = current_equity
-                        ProfessionalLogger.log(f"Daily Start Equity set to: ${self.daily_start_equity:.2f}", "RISK", "ENGINE")
                     
-                    # Calculate daily PnL percent
-                    daily_pnl = current_equity - self.daily_start_equity
-                    daily_pnl_percent = (daily_pnl / self.daily_start_equity) * 100
+                # 2. Event Trigger
+                if tick.time_msc != self.last_tick_time:
+                    self.last_tick_time = tick.time_msc
+                    self._process_market_tick(tick)
+                
+                # 3. Periodic Maintenance (Non-Blocking)
+                current_time = time.time()
+                if current_time - self.last_periodic_check > 5.0: # 5 Seconds
+                    self._run_periodic_maintenance()
+                    self.last_periodic_check = current_time
                     
-                    if daily_pnl_percent < -Config.MAX_DAILY_LOSS_PERCENT:
-                        ProfessionalLogger.log(f"🛑 DAILY LOSS LIMIT HIT: {daily_pnl_percent:.2f}% < -{Config.MAX_DAILY_LOSS_PERCENT}%", "CRITICAL", "RISK")
-                        ProfessionalLogger.log("CLOSING ALL POSITIONS AND STOPPING FOR THE DAY", "CRITICAL", "RISK")
-                        
-                        # Close all positions
-                        for ticket in list(self.active_positions.keys()):
-                            self.executor.close_position(ticket, Config.SYMBOL)
-                        
-                        self.running = False
-                        break
-                        
-                df_current = pd.DataFrame(rates)
-                
-                # ==========================================
-                # FEATURE CALCULATION & CACHING
-                # ==========================================
-                # Only recalculate features if enough time has passed or data has changed significantly
-                current_time = datetime.now()
-                if self.last_feature_time is None or \
-                   (current_time - self.last_feature_time).total_seconds() > Config.FEATURE_RECALC_INTERVAL_SECONDS:
-                    self.cached_features = self.feature_engine.calculate_features(df_current)
-                    self.last_feature_time = current_time
-                    ProfessionalLogger.log(f"Refresh: Recalculated technical features for {Config.SYMBOL}", "DATA", "ENGINE")
-                features = self.cached_features
-                
-                # Heartbeat every 20 iterations (approx every 5 mins)
-                # Periodic Market Diagnostics (Every ~5 mins)
-                if self.iteration % 5 == 0:
-                    features = self.cached_features
-                    vol = features['volatility'].iloc[-1] if features is not None and 'volatility' in features else 0
-                    base_atr = features['atr'].iloc[-1] if features is not None and 'atr' in features else 0
-                    
-                    ProfessionalLogger.log(
-                        f"📊 MARKET DIAGNOSTIC | Iteration {self.iteration}", 
-                        "INFO", "ENGINE"
-                    )
-                    ProfessionalLogger.log(
-                        f"   Regime: {self.last_regime} | Volatility: {vol:.4f} | ATR: {base_atr:.5f}", 
-                        "DATA", "ENGINE"
-                    )
-                    
-                    if self.active_positions:
-                        total_pnl = sum([p.get('pnl', 0) for p in self.active_positions.values()])
-                        ProfessionalLogger.log(f"   Active Positions: {len(self.active_positions)} | Total Open PnL: ${total_pnl:.2f}", "TRADE", "ENGINE")
-                
-                # ==========================================
-                # MULTI-TIMEFRAME ANALYSIS
-                # ==========================================
-                multi_tf_signal = None
-                multi_tf_confidence = 0
-                multi_tf_alignment = 0
-                min_confidence_override = Config.MIN_CONFIDENCE
-                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
-                
-                if Config.MULTI_TIMEFRAME_ENABLED:
-                    try:
-                        mtf_recommendation = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
-                        
-                        if mtf_recommendation:
-                            multi_tf_signal = mtf_recommendation.get('consensus_signal')
-                            multi_tf_confidence = mtf_recommendation.get('confidence', 0)
-                            multi_tf_alignment = mtf_recommendation.get('alignment_score', 0)
-                            trend_filter_passed = mtf_recommendation.get('trend_filter_passed', True)
-                            
-                            recommendation = mtf_recommendation.get('recommendation', 'HOLD')
-                            ProfessionalLogger.log(
-                                f"Multi-TF: {recommendation} | "
-                                f"Align: {multi_tf_alignment:.0%} | "
-                                f"Conf: {multi_tf_confidence:.0%} | "
-                                f"Trend Filter: {'PASS' if trend_filter_passed else 'FAIL'}",
-                                "ANALYSIS", "MULTI_TF"
-                            )
-                            
-                            if not trend_filter_passed:
-                                ProfessionalLogger.log("Trade blocked by H1 trend filter", "WARNING", "MULTI_TF")
-                                signal = None # Block main signal if trend filter fails
-                            
-                            elif multi_tf_alignment < Config.TIMEFRAME_ALIGNMENT_THRESHOLD and Config.REQUIRE_TIMEFRAME_ALIGNMENT:
-                                # Relaxed threshold raising during NY/London
-                                is_high_volume_session = (Config.LONDON_OPEN_HOUR <= datetime.now().hour <= Config.NY_CLOSE_HOUR)
-                                conf_mult = 1.15 if is_high_volume_session else 1.3
-                                agree_mult = 1.1 if is_high_volume_session else 1.2
-                                
-                                min_confidence_override = Config.MIN_CONFIDENCE * conf_mult
-                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * agree_mult
-                                
-                                ProfessionalLogger.log(
-                                    f"Low alignment ({multi_tf_alignment:.0%} < {Config.TIMEFRAME_ALIGNMENT_THRESHOLD:.0%}) - "
-                                    f"{'NY/London session (relaxed)' if is_high_volume_session else 'Standard'} "
-                                    f"thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
-                                    "WARNING", "MULTI_TF"
-                                )
-                            
-                            elif recommendation in ['STRONG_BUY', 'STRONG_SELL']:
-                                min_confidence_override = Config.MIN_CONFIDENCE * 0.9
-                                min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT * 0.9
-                                ProfessionalLogger.log(
-                                    f"Strong multi-TF signal - "
-                                    f"lowering thresholds: Conf>{min_confidence_override:.0%}, Agree>{min_agreement_override:.0%}",
-                                    "INFO", "MULTI_TF"
-                                )
-                                
-                    except Exception as e:
-                        ProfessionalLogger.log(f"Multi-TF analysis error: {str(e)}", "ERROR", "MULTI_TF")
-                        min_confidence_override = Config.MIN_CONFIDENCE
-                        min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
-                
-                # ==========================================
-                # MAIN MODEL PREDICTION
-                # ==========================================
-                # Use model_lock to ensure no prediction during background training
-                with self.model_lock:
-                    signal, confidence, dict_features, model_details = self.model.predict(df_current, features) # Pass cached features
-                
-                # ==========================================
-                # ADAPTIVE EXIT LOGIC
-                # ==========================================
-                if self.active_positions:
-                    self.exit_manager.manage_positions(
-                        features, 
-                        self.active_positions, 
-                        signal, 
-                        confidence
-                    )
-                
-                # ==========================================
-                # SIGNAL VALIDATION & FILTERING
-                # ==========================================
-                if signal is None:
-                    if self.iteration % 30 == 0:
-                        tick = mt5.symbol_info_tick(Config.SYMBOL)
-                        if tick:
-                            price = tick.ask
-                            positions = self.get_current_positions()
-                            ProfessionalLogger.log(
-                                f"Waiting for signal | Price: {price:.2f} | "
-                                f"Positions: {positions} | "
-                                f"Multi-TF: {multi_tf_signal if multi_tf_signal is not None else 'N/A'}",
-                                "INFO", "ENGINE"
-                            )
-                    # Prepare for next iteration with non-blocking sleep
-                    sleep_time = self._calculate_sleep_time()
-                    for _ in range(int(sleep_time)):
-                        if not self.running: break
-                        if _ % 5 == 0 and self.active_positions:
-                            df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
-                            if df_current_quick is not None:
-                                df_features_quick = self.feature_engine.calculate_features(df_current_quick)
-                                self.exit_manager.manage_positions(
-                                    df_features_quick, 
-                                    self.active_positions, 
-                                    None, 0.5
-                                )
-                        time.sleep(1)
-                    continue
-                
-                # Calculate model agreement
-                agreement = 0
-                if model_details:
-                    predictions = [m['prediction'] for m in model_details.values() 
-                                if m['prediction'] != -1]
-                    if predictions:
-                        agreement = predictions.count(signal) / len(predictions)
-                
-                # Multi-TF validation
-                market_context = {
-                    'regime': self.last_regime,
-                    'is_asian_session': 0 <= datetime.now().hour < 9,
-                    'multi_tf_signal': multi_tf_signal,
-                    'spread_ok': True, # Already checked in main loop? check ticket.
-                    'news_event': False, # Placeholder
-                    'dxy_trend': self._get_dxy_trend() # Inject DXY Status
-                }
-                
-                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
-                    if multi_tf_signal != 0.5:
-                        signal_match = (signal == 1 and multi_tf_signal > 0.6) or \
-                                    (signal == 0 and multi_tf_signal < 0.4)
-                        
-                        if not signal_match:
-                            ProfessionalLogger.log(
-                                f"Model signal ({'BUY' if signal == 1 else 'SELL'}) "
-                                f"rejected by multi-TF consensus ({multi_tf_signal:.2f})",
-                                "WARNING", "MULTI_TF"
-                            )
-                            # Prepare for next iteration with non-blocking sleep
-                            sleep_time = self._calculate_sleep_time()
-                            for _ in range(int(sleep_time)):
-                                if not self.running: break
-                                if _ % 5 == 0 and self.active_positions:
-                                    df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
-                                    if df_current_quick is not None:
-                                        df_features_quick = self.feature_engine.calculate_features(df_current_quick)
-                                        self.exit_manager.manage_positions(
-                                            df_features_quick, 
-                                            self.active_positions, 
-                                            None, 0.5
-                                        )
-                                time.sleep(1)
-                            continue
-                
-                # Combined confidence
-                combined_confidence = confidence
-                if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_confidence > 0:
-                    combined_confidence = (confidence * 0.7) + (multi_tf_confidence * 0.3)
-                
-                # Signal Quality Filtering
-                market_context = {
-                    'volatility_regime': dict_features.get('volatility_regime', 1),
-                    'spread_pips': 2,  # Default
-                    'hour': datetime.now().hour,
-                    'high_impact_news_soon': False,
-                    'existing_positions': list(self.active_positions.values()),
-                    'vol_surprise': dict_features.get('vol_surprise', 0),
-                    'market_regime': self.last_regime,
-                    'multi_tf_alignment': multi_tf_alignment,
-                    'multi_tf_signal': multi_tf_signal
-                }
-                
-                is_valid, filter_reason = self.signal_filter.validate_signal(
-                    signal, combined_confidence, dict_features, market_context
-                )
-                
-                if not is_valid:
-                    ProfessionalLogger.log(f"Signal rejected by filter: {filter_reason}", "FILTER", "ENGINE")
-                    # Prepare for next iteration with non-blocking sleep
-                    sleep_time = self._calculate_sleep_time()
-                    for _ in range(int(sleep_time)):
-                        if not self.running: break
-                        if _ % 5 == 0 and self.active_positions:
-                            df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
-                            if df_current_quick is not None:
-                                df_features_quick = self.feature_engine.calculate_features(df_current_quick)
-                                self.exit_manager.manage_positions(
-                                    df_features_quick, 
-                                    self.active_positions, 
-                                    None, 0.5
-                                )
-                        time.sleep(1)
-                    continue
-                
-                # Entry Timing Confirmation
-                if Config.USE_CONFIRMATION_ENTRY:
-                    should_enter, entry_reason = self.entry_timing.should_enter(
-                        signal, combined_confidence, dict_features, df_current
-                    )
-                    
-                    if not should_enter:
-                        ProfessionalLogger.log(f"Entry delayed: {entry_reason}", "CONFIRMATION", "ENGINE")
-                        # Prepare for next iteration with non-blocking sleep
-                        sleep_time = self._calculate_sleep_time()
-                        for _ in range(int(sleep_time)):
-                            if not self.running: break
-                            if _ % 5 == 0 and self.active_positions:
-                                df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
-                                if df_current_quick is not None:
-                                    df_features_quick = self.feature_engine.calculate_features(df_current_quick)
-                                    self.exit_manager.manage_positions(
-                                        df_features_quick, 
-                                        self.active_positions, 
-                                        None, 0.5
-                                    )
-                            time.sleep(1)
-                        continue
-                
-                # Log comprehensive signal analysis
-                signal_type = "BUY" if signal == 1 else "SELL"
-                status_msg = (f"Signal Analysis | {signal_type} | "
-                            f"Model Conf: {confidence:.1%} | "
-                            f"Agreement: {agreement:.0%} | ")
-                
-                if Config.MULTI_TIMEFRAME_ENABLED:
-                    status_msg += f"Multi-TF Align: {multi_tf_alignment:.0%} | "
-                    status_msg += f"Combined Conf: {combined_confidence:.1%}"
-                else:
-                    status_msg += f"Price: {df_current['close'].iloc[-1]:.2f}"
-                
-                ProfessionalLogger.log(status_msg, "ANALYSIS", "ENGINE")
-                
-                # Log key features
-                if dict_features is not None:
-                    key_features = {
-                        'rsi': dict_features.get('rsi_normalized', 0) * 50 + 50,
-                        'volatility': dict_features.get('volatility', 0),
-                        'regime': dict_features.get('regime_encoded', 0),
-                        'atr_percent': dict_features.get('atr_percent', 0)
-                    }
-                    ProfessionalLogger.log(
-                        f"Key Features: RSI={key_features['rsi']:.1f} | "
-                        f"Vol={key_features['volatility']:.4f} | "
-                        f"Regime={key_features['regime']} | "
-                        f"ATR%={key_features['atr_percent']:.4f}",
-                        "DATA", "ENGINE"
-                    )
-                
-                # ==========================================
-                # TRADE EXECUTION DECISION
-                # ==========================================
-                execute_trade = False
-                execution_reason = ""
-                
-                if (combined_confidence >= min_confidence_override and 
-                    agreement >= min_agreement_override):
-                    
-                    if Config.MULTI_TIMEFRAME_ENABLED and Config.REQUIRE_TIMEFRAME_ALIGNMENT:
-                        if multi_tf_alignment >= Config.TIMEFRAME_ALIGNMENT_THRESHOLD:
-                            execute_trade = True
-                            execution_reason = "Strong multi-TF alignment"
-                        elif combined_confidence > (min_confidence_override * 1.5):
-                            execute_trade = True
-                            execution_reason = f"Very high confidence ({combined_confidence:.1%})"
-                        else:
-                            execution_reason = f"Low multi-TF alignment ({multi_tf_alignment:.0%})"
-                    else:
-                        execute_trade = True
-                        execution_reason = "Thresholds met (Alignment Requirement Disabled)"
-                
-                if execute_trade:
-                    ProfessionalLogger.log(
-                        f"🎯 {execution_reason} - Executing {signal_type} signal! | "
-                        f"Combined Confidence: {combined_confidence:.1%}",
-                        "SUCCESS", "ENGINE"
-                    )
-                    
-                    if Config.MULTI_TIMEFRAME_ENABLED and multi_tf_signal is not None:
-                        if 'multi_tf' not in model_details:
-                            model_details['multi_tf'] = {}
-                        model_details['multi_tf'].update({
-                            'consensus_signal': multi_tf_signal,
-                            'alignment_score': multi_tf_alignment,
-                            'confidence': multi_tf_confidence,
-                            'min_thresholds_applied': {
-                                'confidence': min_confidence_override,
-                                'agreement': min_agreement_override
-                            }
-                        })
-                    
-                    self.execute_trade(signal, combined_confidence, df_current, dict_features, model_details)
-                else:
-                    if self.iteration % 10 == 0:
-                        ProfessionalLogger.log(
-                            f"Signal rejected | Reason: {execution_reason} | "
-                            f"Conf: {combined_confidence:.1%} (need {min_confidence_override:.1%}) | "
-                            f"Agree: {agreement:.0%} (need {min_agreement_override:.0%})",
-                            "INFO", "ENGINE"
-                        )
-                
-                self.update_performance_metrics()
-                
-                # Prepare for next iteration with non-blocking sleep
-                sleep_time = self._calculate_sleep_time()
-                
-                # Non-blocking sleep loop to allow emergency exits
-                for _ in range(int(sleep_time)):
-                    if not self.running: break
-                    
-                    # Every 5 seconds, check if we need to manage existing positions
-                    if _ % 5 == 0:
-                         # 1. Check for closed positions (Immediate Logging)
-                         self.check_closed_positions()
-                         
-                         # 2. Manage active positions
-                         if self.active_positions:
-                            df_current_quick = self.get_historical_data(timeframe=Config.TIMEFRAME, bars=100)
-                            if df_current_quick is not None:
-                                df_features_quick = self.feature_engine.calculate_features(df_current_quick)
-                                self.exit_manager.manage_positions(
-                                    df_features_quick, 
-                                    self.active_positions, 
-                                    None, 0.5
-                                )
-                                # Log short dashboard
-                                for ticket, trade in self.active_positions.items():
-                                    ProfessionalLogger.log(f"Active #{ticket}: {trade['type']} @ {trade['open_price']:.2f} | PnL: {trade.get('pnl', 0):.2f} | HWM: {trade.get('max_runge_profit', 0):.2f}", "TRADE", "MANAGER")
-                    
-                    time.sleep(1)
+                # 4. Micro-sleep to prevent 100% CPU usage (1ms)
+                time.sleep(0.001)
                 
         except Exception as e:
-            ProfessionalLogger.log(f"Engine error in main loop: {e}", "ERROR", "ENGINE")
+            ProfessionalLogger.log(f"Engine CRITICAL error: {e}", "ERROR", "ENGINE")
             import traceback
             traceback.print_exc()
-            time.sleep(10) # Blocking sleep on error to prevent rapid error loops
         except KeyboardInterrupt:
             ProfessionalLogger.log("\nShutdown requested by user", "WARNING", "ENGINE")
         finally:
@@ -6802,6 +6774,152 @@ class EnhancedTradingEngine:
             self.print_performance_report()
             mt5.shutdown()
             ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
+
+    def _process_market_tick(self, tick):
+        """Handle a single market tick event"""
+        try:
+            # 1. Update active positions (Real-time PnL/Trailing)
+            if self.active_positions:
+                # Fast update
+                self.exit_manager.manage_positions(
+                    None, self.active_positions, None, 0.5, 
+                    fast_tick_update=True, current_price=tick.ask
+                )
+
+            # 2. Check Feature Recalc Needed (Time-based throttler still applies to heavy ML features)
+            current_time = datetime.now()
+            should_recalc = False
+            if self.last_feature_time is None or \
+               (current_time - self.last_feature_time).total_seconds() > Config.FEATURE_RECALC_INTERVAL_SECONDS:
+                should_recalc = True
+            
+            # If not time to recalc features, skip heavy logic unless we have open positions that need logic
+            if not should_recalc and not self.active_positions:
+                return
+
+            # 3. Fetch Data & Features
+            rates = mt5.copy_rates_from_pos(Config.SYMBOL, Config.TIMEFRAME, 0, self.required_lookback)
+            if rates is None or len(rates) < Config.TREND_MA + 10:
+                return
+
+            df_current = pd.DataFrame(rates)
+            
+            if should_recalc:
+                self.cached_features = self.feature_engine.calculate_features(df_current)
+                self.last_feature_time = current_time
+                # ProfessionalLogger.log("Tick: Features updated", "DEBUG", "ENGINE")
+            
+            features = self.cached_features
+            
+            # 4. ML Prediction
+            signal = None
+            confidence = 0
+            
+            # New: Update Bayesian Detector
+            is_shock, shock_prob = self.bayes_detector.detect_regime_switch(tick.ask)
+            if is_shock:
+                 # ProfessionalLogger.log(f"Bayesian Risk Alert: Shock Probability {shock_prob:.2f}", "RISK", "ENGINE")
+                 pass
+
+            with self.model_lock:
+                 signal, confidence, dict_features, model_details = self.model.predict(df_current, features)
+
+            # 5. Multi-TF & Filter Checks
+            multi_tf_signal = None
+            multi_tf_conf = 0
+            trend_filter_passed = True
+            
+            min_confidence_override = Config.MIN_CONFIDENCE
+            min_agreement_override = Config.MIN_ENSEMBLE_AGREEMENT
+            
+            # Adjust for Shock
+            if is_shock:
+                min_confidence_override = max(min_confidence_override, 0.85) # Require 85% confidence in shock
+                
+            if Config.MULTI_TIMEFRAME_ENABLED:
+                mtf_res = self.multi_tf_analyser.get_multi_timeframe_recommendation(Config.SYMBOL)
+                if mtf_res:
+                    multi_tf_signal = mtf_res.get('consensus_signal')
+                    multi_tf_conf = mtf_res.get('confidence', 0)
+                    trend_filter_passed = mtf_res.get('trend_filter_passed', True)
+                    
+                    if not trend_filter_passed:
+                         # Log logic handled in the class, just veto here
+                         signal = None
+            
+            # 6. Signal Valid?
+            if signal is not None:
+                # Combined Confidence
+                final_conf = confidence
+                if multi_tf_conf > 0:
+                     final_conf = (confidence * 0.7) + (multi_tf_conf * 0.3)
+                
+                # Check Filters
+                market_context = {
+                    'regime': self.last_regime,
+                    'multi_tf_signal': multi_tf_signal,
+                    'existing_positions': list(self.active_positions.values())
+                }
+                is_valid, reason = self.signal_filter.validate_signal(signal, final_conf, dict_features, market_context)
+                
+                if is_valid:
+                     # ==========================================
+                     # LEVEL 2 (DOM) SAFETY CHECK
+                     # ==========================================
+                     dom_veto = False
+                     flow_analysis = self.order_flow.analyze_flow()
+                     imbalance = flow_analysis.get('imbalance', 0)
+                     walls = flow_analysis.get('walls', {})
+                     
+                     current_price = tick.ask if signal == 1 else tick.bid
+                     
+                     if signal == 1: # Buying
+                         if walls.get('sell_wall'):
+                             dist = walls['sell_wall']['price'] - current_price
+                             if dist < 0.0050: # Wall within 50 points (approx 5 pips)
+                                 ProfessionalLogger.log(f"DOM VETO: Sell Wall at {walls['sell_wall']['price']} (Dist: {dist:.5f})", "WARNING", "EXECUTION")
+                                 dom_veto = True
+                     elif signal == 0: # Selling
+                         if walls.get('buy_wall'):
+                             dist = current_price - walls['buy_wall']['price']
+                             if dist < 0.0050:
+                                 ProfessionalLogger.log(f"DOM VETO: Buy Wall at {walls['buy_wall']['price']} (Dist: {dist:.5f})", "WARNING", "EXECUTION")
+                                 dom_veto = True
+                     
+                     if not dom_veto:
+                         self.execute_trade(signal, final_conf, df_current, dict_features, model_details)
+                else:
+                    pass # Filtered out silent or logged by filter
+
+        except Exception as e:
+            ProfessionalLogger.log(f"Tick process error: {e}", "ERROR", "ENGINE")
+
+    def _run_periodic_maintenance(self):
+        """Run tasks that don't need to happen every tick"""
+        try:
+             # 1. Daily Risk Check
+             account = mt5.account_info()
+             if account:
+                 if not hasattr(self, 'daily_start_equity') or self.daily_start_equity == 0:
+                     self.daily_start_equity = account.equity
+                 
+                 pnl_pct = ((account.equity - self.daily_start_equity) / self.daily_start_equity) * 100
+                 if pnl_pct < -Config.MAX_DAILY_LOSS_PERCENT:
+                     ProfessionalLogger.log(f"DAILY LOSS LIMIT HIT: {pnl_pct:.2f}%", "CRITICAL", "RISK")
+                     self.running = False
+            
+             # 2. Periodic Tasks
+             self.run_periodic_tasks()
+             
+             # 3. Market Diagnostic Log
+             if self.iteration % 12 == 0: # Approx 1 min (assuming 5s check interval)
+                 account = mt5.account_info() # Re-fetch for fresh equity
+                 ProfessionalLogger.log(f"Heartbeat | Equity: {account.equity:.2f} | Time: {datetime.now().strftime('%H:%M:%S')}", "INFO", "ENGINE")
+
+             self.iteration += 1
+
+        except Exception as e:
+            ProfessionalLogger.log(f"Maintenance error: {e}", "ERROR", "ENGINE")
 
 # ==========================================
 # MAIN FUNCTION
