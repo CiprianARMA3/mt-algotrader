@@ -85,7 +85,7 @@ class Config:
     MAX_RISK_PER_TRADE = 200  # INCREASED from 100 to 200
     
     # Signal Quality - Dynamic thresholds
-    MIN_CONFIDENCE = 0.30  # REDUCED from 0.40 to 0.30 for faster entries
+    MIN_CONFIDENCE = 0.50  # REDUCED from 0.40 to 0.30 for faster entries
     MIN_ENSEMBLE_AGREEMENT = 0.50
     
     # Position Limits
@@ -6463,7 +6463,7 @@ class EnhancedTradingEngine:
         # Adjust Lookup based Risk/Reward if enabled
         target_rr = 2.0
         if Config.ENABLE_LOOKUP_TABLES and self.feature_engine.lookup_tables:
-            target_rr = self.feature_engine.lookup_tables.get_risk_reward_ratio(final_confidence)
+            target_rr = self.feature_engine.lookup_tables.get_rr_ratio(final_confidence)
         
         # ==========================================
         # 2. CALCULATE DYNAMIC STOP LOSS & TAKE PROFIT
@@ -7047,7 +7047,8 @@ class EnhancedTradingEngine:
                      if not dom_veto:
                          self.execute_trade(signal, final_conf, df_current, dict_features, model_details)
                 else:
-                    pass # Filtered out silent or logged by filter
+                    # NEW: Log why the trade was rejected
+                    ProfessionalLogger.log(f"Signal Rejected: {reason}", "INFO", "FILTER")
 
         except Exception as e:
             ProfessionalLogger.log(f"Tick process error: {e}", "ERROR", "ENGINE")
