@@ -261,6 +261,14 @@ class Config:
     PEAK_VOLATILITY_START = 8  # London Open
     PEAK_VOLATILITY_END = 20   # NY Close
     
+    # Legacy session parameters (Required by Filters)
+    AVOID_ASIAN_SESSION = False
+    PREFER_LONDON_NY_OVERLAP = True
+    LONDON_OPEN_HOUR = 8
+    LONDON_CLOSE_HOUR = 16
+    NY_OPEN_HOUR = 13
+    NY_CLOSE_HOUR = 20
+    
     # Swing Mode Parameters (Outside Peak Hours)
     SWING_ATR_MULTIPLIER = 3.5  # Wider SL
     SWING_RR_RATIO = 2.5       # Target larger moves
