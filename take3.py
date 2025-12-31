@@ -54,7 +54,7 @@ class Config:
     
     # Position sizing with enhanced scaling
     BASE_VOLUME = 0.01
-    MAX_VOLUME = 0.05
+    MAX_VOLUME = 0.030
     MIN_VOLUME = 0.01
     VOLUME_STEP = 0.01
     
