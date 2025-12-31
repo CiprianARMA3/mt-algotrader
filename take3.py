@@ -149,7 +149,7 @@ class Config:
     USE_DYNAMIC_BARRIERS = True  # New: Dynamic ATR-based barriers
     BARRIER_UPPER = 0.0020
     BARRIER_LOWER = -0.0015
-    BARRIER_TIME = 12                # Shortened to 1 hour (12 bars on M5) for day trading
+    BARRIER_TIME = 24                # Shortened to 1 hour (12 bars on M5) for day trading
     
     # Ensemble Configuration - ENHANCED
     USE_STACKING_ENSEMBLE = True
@@ -5677,6 +5677,7 @@ class EnhancedTradingEngine:
         self.iteration = 0
         self.last_analysis_time = None
         self.last_regime = None
+        self.last_snapshot_time = None # New: For periodic market data logging
         
         # Background Training
         self.training_thread = None
@@ -5804,6 +5805,32 @@ class EnhancedTradingEngine:
         
         if insights:
             ProfessionalLogger.log("📈 MARKET INSIGHTS:", "ANALYSIS", "ENGINE")
+            archive_data = {
+                "timestamp": datetime.now().isoformat(),
+                "insights": insights,
+                "regime": analysis.get('market_regime', {}).get('regime', 'unknown'),
+                "confidence": analysis.get('market_regime', {}).get('confidence', 0)
+            }
+            
+            # PERSISTENCE: Save to file for 24h review & model training
+            try:
+                history = []
+                if os.path.exists(Config.MARKET_INSIGHTS_FILE):
+                    with open(Config.MARKET_INSIGHTS_FILE, 'r') as f:
+                        try:
+                            history = json.load(f)
+                        except json.JSONDecodeError:
+                            history = []
+                
+                history.append(archive_data)
+                # Keep last 1000 insights to prevent file bloat
+                history = history[-1000:]
+                
+                with open(Config.MARKET_INSIGHTS_FILE, 'w') as f:
+                    json.dump(history, f, indent=4)
+            except Exception as e:
+                ProfessionalLogger.log(f"Failed to archive insights: {e}", "ERROR", "ENGINE")
+
             for insight in insights:
                 ProfessionalLogger.log(f"  • {insight}", "ANALYSIS", "ENGINE")
     
@@ -6587,7 +6614,10 @@ class EnhancedTradingEngine:
                      'rsi': features.get('rsi', 50),
                      'trend': features.get('trend_direction', 0),
                      'spread': tick.ask - tick.bid,
-                     'regime': self.last_regime
+                     'regime': self.last_regime,
+                     'dom_imbalance': self.order_flow.get_order_book_imbalance(),
+                     'entropy': features.get('shannon_entropy', 0),
+                     'hurst': features.get('hurst_exponent', 0.5)
                  }
                  rl_action = {'signal': signal, 'confidence': final_confidence}
                  self.rl_collector.record_entry(result.order, rl_state, rl_action)
@@ -6775,6 +6805,49 @@ class EnhancedTradingEngine:
             mt5.shutdown()
             ProfessionalLogger.log("Disconnected from MT5", "INFO", "ENGINE")
 
+    def _save_market_snapshot(self, features):
+        """Save a complete snapshot of market state for later training"""
+        try:
+            current_time = datetime.now()
+            # Log every 15 minutes to align with M15 strategy
+            if self.last_snapshot_time is not None and \
+               (current_time - self.last_snapshot_time).total_seconds() < 900:
+                return
+
+            snapshot = {
+                "timestamp": current_time.isoformat(),
+                "price": mt5.symbol_info_tick(Config.SYMBOL).ask,
+                "regime": self.last_regime,
+                "dom_imbalance": self.order_flow.get_order_book_imbalance(),
+                "entropy": features.get('shannon_entropy', 0),
+                "hurst": features.get('hurst_exponent', 0.5),
+                "rsi": features.get('rsi', 50),
+                "volatility": features.get('volatility', 0)
+            }
+            
+            # Save to a dedicated history file
+            history_file = os.path.join(Config.CACHE_DIR, "market_data_history.json")
+            history = []
+            if os.path.exists(history_file):
+                with open(history_file, 'r') as f:
+                    try:
+                        history = json.load(f)
+                    except:
+                        history = []
+            
+            history.append(snapshot)
+            # Keep last 5000 snapshots (approx 52 days of M15 data)
+            history = history[-5000:]
+            
+            with open(history_file, 'w') as f:
+                json.dump(history, f, indent=4)
+            
+            self.last_snapshot_time = current_time
+            # ProfessionalLogger.log("Market snapshot saved for learning", "DEBUG", "DATA")
+            
+        except Exception as e:
+            ProfessionalLogger.log(f"Snapshot Error: {e}", "ERROR", "DATA")
+
     def _process_market_tick(self, tick):
         """Handle a single market tick event"""
         try:
@@ -6911,7 +6984,11 @@ class EnhancedTradingEngine:
              # 2. Periodic Tasks
              self.run_periodic_tasks()
              
-             # 3. Market Diagnostic Log
+             # 3. Market Snapshot (Institutional persistence)
+             if self.cached_features:
+                 self._save_market_snapshot(self.cached_features)
+                 
+             # 4. Market Diagnostic Log
              if self.iteration % 12 == 0: # Approx 1 min (assuming 5s check interval)
                  account = mt5.account_info() # Re-fetch for fresh equity
                  ProfessionalLogger.log(f"Heartbeat | Equity: {account.equity:.2f} | Time: {datetime.now().strftime('%H:%M:%S')}", "INFO", "ENGINE")
