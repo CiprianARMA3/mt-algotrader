@@ -474,29 +474,30 @@ class Config:
 
     MULTI_TIMEFRAME_PARAMS = {
         # Alignment bonus scaling
-        'ALIGNMENT_BONUS_ABOVE_START': 0.8,
-        'ALIGNMENT_BONUS_ABOVE_RANGE': 0.2,
-        'ALIGNMENT_BONUS_BELOW_START': 0.4,
-        'ALIGNMENT_BONUS_BELOW_RANGE': 0.4,
+        # Alignment bonus scaling - WIDER RANGE for more movement
+        'ALIGNMENT_BONUS_ABOVE_START': 0.85,
+        'ALIGNMENT_BONUS_ABOVE_RANGE': 0.15,
+        'ALIGNMENT_BONUS_BELOW_START': 0.15,
+        'ALIGNMENT_BONUS_BELOW_RANGE': 0.7,
         
         # Trend bonus parameters
-        'TREND_BONUS_SUPPORT': 1.0,      # When H1 trend supports trade
-        'TREND_BONUS_NEUTRAL': 0.8,      # When H1 is neutral
-        'TREND_BONUS_OPPOSITE': 0.5,     # When H1 trend opposes trade
+        'TREND_BONUS_SUPPORT': 1.1,      # Reward strong macro trend alignment
+        'TREND_BONUS_NEUTRAL': 0.8,
+        'TREND_BONUS_OPPOSITE': 0.4,     # More punishing veto
         
         # Confidence calculation
-        'BASE_CONFIDENCE_MULTIPLIER': 0.9,
-        'CONFIDENCE_FLOOR': 0.2,
-        'CONFIDENCE_CEILING': 0.95,
+        'BASE_CONFIDENCE_MULTIPLIER': 0.95,
+        'CONFIDENCE_FLOOR': 0.05,
+        'CONFIDENCE_CEILING': 0.98,
         
-        # Signal generation parameters
-        'BUY_SIGNAL_THRESHOLD': 0.35,
-        'SELL_SIGNAL_THRESHOLD': -0.35,
+        # Signal generation thresholds - REDUCED for higher sensitivity
+        'BUY_SIGNAL_THRESHOLD': 0.20,
+        'SELL_SIGNAL_THRESHOLD': -0.20,
         
-        # Timeframe signal multipliers
-        'M1_SIGNAL_MULTIPLIER': 0.7,
-        'M5_SIGNAL_MULTIPLIER': 0.9,
-        'M15_SIGNAL_MULTIPLIER': 1.1,
+        # Timeframe signal multipliers - INCREASED for lower timeframes
+        'M1_SIGNAL_MULTIPLIER': 1.0,
+        'M5_SIGNAL_MULTIPLIER': 1.1,
+        'M15_SIGNAL_MULTIPLIER': 1.2,
         'M30_SIGNAL_MULTIPLIER': 1.3,
         
         # Feature weight adjustments for Asian session
@@ -5531,12 +5532,15 @@ class MultiTimeframeAnalyser:
         # Normalize score
         # Max score (Strong Trend): 2 (Trend) + 0 (Price) + 0 (RSI) + 1 (Mom) = 3
         # Max score (Normal): 1 + 1 + 1 + 1 = 4
-        # We divide by 4 to be conservative
-        normalized_score = max(-1, min(1, signal_score / 4))
+        # We use a divisor of 3.0 to increase sensitivity (easier to reach thresholds)
+        normalized_score = max(-1, min(1, signal_score / 3.0))
         
-        if normalized_score > 0.24:
+        buy_threshold = mtf_params.get('BUY_SIGNAL_THRESHOLD', 0.25)
+        sell_threshold = mtf_params.get('SELL_SIGNAL_THRESHOLD', -0.25)
+        
+        if normalized_score > buy_threshold:
             return 1
-        elif normalized_score < -0.24:
+        elif normalized_score < sell_threshold:
             return 0
         else:
             return 0.5
