@@ -2772,32 +2772,26 @@ class EnhancedFeatureEngine:
         # ADVANCED STATISTICAL FEATURES (INSTITUTIONAL)
         # ==========================================
         try:
-            # 1. Shannon Entropy (Rolling Chaos Meter)
-            # Window 50 bars (approx 4 hours on M5)
+            # 1. Entropy (Rolling Chaos Meter)
             df['entropy'] = df['returns'].rolling(window=50).apply(self._calculate_shannon_entropy)
             
             # 2. Hurst Exponent (Trend Persistence)
-            # Window 100 bars (approx 8 hours on M5)
-            df['hurst'] = df['close'].rolling(window=100).apply(self._calculate_hurst)
+            df['hurst_exponent'] = df['close'].rolling(window=100).apply(self._calculate_hurst)
             
-            # 3. GARCH Volatility Forecast (Predictive Risk)
-            # We calculate this on a rolling window to simulate real-time forecasting
-            # Note: GARCH is heavy, so we might optimize to only do it on the last candle in live mode
-            # For backfilled dataframe, we'll use a simplified rolling approach or just realized vol
+            # 3. GARCH Volatility Forecast
             if len(df) > 100:
-                # Calculate only for the last candle to save time during live usage
-                returns_subset = df['returns'].iloc[-500:] # Last 500 bars for fitting
+                returns_subset = df['returns'].iloc[-500:] 
                 forecast_vol = self._calculate_garch_volatility(returns_subset.dropna())
-                df['garch_vol'] = 0.0
-                df.iloc[-1, df.columns.get_loc('garch_vol')] = forecast_vol
+                df['garch_volatility'] = 0.0
+                df.iloc[-1, df.columns.get_loc('garch_volatility')] = forecast_vol
             else:
-                 df['garch_vol'] = df['volatility'] # Fallback
+                 df['garch_volatility'] = df['volatility'] 
             
         except Exception as e:
             ProfessionalLogger.log(f"Stat Feature Error: {e}", "WARNING", "FEATURE_ENGINE")
             df['entropy'] = 0
-            df['hurst'] = 0.5
-            df['garch_vol'] = 0
+            df['hurst_exponent'] = 0.5
+            df['garch_volatility'] = 0
         
         # Final cleanup
         all_features = self.get_feature_columns()
@@ -3120,7 +3114,7 @@ class EnhancedFeatureEngine:
             'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'month_sin', 'month_cos',
             'volume_ratio', 'volume_ratio_prev', 'volume_zscore', 'volume_zscore_prev', 'volume_price_correlation', 'volume_spike',
             'garch_volatility', 'garch_vol_ratio',
-            'hurst_exponent', 'regime_encoded',
+            'hurst_exponent', 'regime_encoded', 'dom_imbalance', 'entropy',
             'var_95', 'cvar_95', 'var_cvar_spread',
             
             # New price action features
@@ -3832,7 +3826,7 @@ class EnhancedEnsemble:
                 
                 # IMPORTANT: Remove columns that overlap with price features to avoid _x/_y suffixes
                 # We only want the unique institutional data from the snapshots
-                cols_to_keep = ['time', 'dom_imbalance', 'regime', 'entropy', 'hurst']
+                cols_to_keep = ['time', 'dom_imbalance', 'regime', 'entropy', 'hurst_exponent']
                 # Only keep columns that actually exist in the snapshot
                 inst_data = inst_data[[c for c in cols_to_keep if c in inst_data.columns]]
                 
@@ -3858,7 +3852,7 @@ class EnhancedEnsemble:
             base_cols = self.feature_engine.get_feature_columns()
             
             # Combine technicals with our new institutional memory columns
-            required_cols = list(dict.fromkeys(base_cols + ['dom_imbalance', 'regime_encoded', 'entropy', 'hurst']))
+            required_cols = list(dict.fromkeys(base_cols + ['dom_imbalance', 'regime_encoded', 'entropy', 'hurst_exponent']))
             
             # Mission-Critical Guard: Ensure every single column exists before indexing
             final_feature_list = []
@@ -3986,6 +3980,11 @@ class EnhancedEnsemble:
             
             if self.trained_feature_columns is None:
                 self.trained_feature_columns = self.feature_engine.get_feature_columns()
+            
+            # Mission-Critical: Ensure df_feat has all columns the model was trained on
+            for col in self.trained_feature_columns:
+                if col not in df_feat.columns:
+                    df_feat[col] = 0.0
                 
             X_raw = df_feat[self.trained_feature_columns].iloc[-1:].fillna(0).replace([np.inf, -np.inf], 0)
             
@@ -6883,8 +6882,8 @@ class EnhancedTradingEngine:
                 "price": mt5.symbol_info_tick(Config.SYMBOL).ask,
                 "regime": self.last_regime,
                 "dom_imbalance": self.order_flow.get_order_book_imbalance(),
-                "entropy": features.get('shannon_entropy', 0),
-                "hurst": features.get('hurst_exponent', 0.5),
+                "entropy": features.get('entropy', 0),
+                "hurst_exponent": features.get('hurst_exponent', 0.5),
                 "rsi": features.get('rsi', 50),
                 "volatility": features.get('volatility', 0)
             }
@@ -6943,8 +6942,16 @@ class EnhancedTradingEngine:
             
             if should_recalc:
                 self.cached_features = self.feature_engine.calculate_features(df_current)
+                
+                # --- LIVE INSTITUTIONAL INJECTION ---
+                # Inject current DOM imbalance and Regime into the feature set
+                self.cached_features['dom_imbalance'] = self.order_flow.get_order_book_imbalance()
+                self.cached_features['regime_encoded'] = {
+                    'trending': 1, 'mean_reverting': 2, 'volatile': 3, 'stress': 4
+                }.get(self.last_regime, 0)
+                
                 self.last_feature_time = current_time
-                # ProfessionalLogger.log("Tick: Features updated", "DEBUG", "ENGINE")
+                # ProfessionalLogger.log("Tick: Features updated with live Institutional Data", "DEBUG", "ENGINE")
             
             features = self.cached_features
             
