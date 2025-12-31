@@ -5678,6 +5678,7 @@ class EnhancedTradingEngine:
         self.last_analysis_time = None
         self.last_regime = None
         self.last_snapshot_time = None # New: For periodic market data logging
+        self.latest_dict_features = {} # New: Dictionary version for snapshots
         
         # Background Training
         self.training_thread = None
@@ -6896,6 +6897,7 @@ class EnhancedTradingEngine:
 
             with self.model_lock:
                  signal, confidence, dict_features, model_details = self.model.predict(df_current, features)
+                 self.latest_dict_features = dict_features # Store for maintenance snapshots
 
             # 5. Multi-TF & Filter Checks
             multi_tf_signal = None
@@ -6985,8 +6987,8 @@ class EnhancedTradingEngine:
              self.run_periodic_tasks()
              
              # 3. Market Snapshot (Institutional persistence)
-             if self.cached_features:
-                 self._save_market_snapshot(self.cached_features)
+             if self.latest_dict_features:
+                 self._save_market_snapshot(self.latest_dict_features)
                  
              # 4. Market Diagnostic Log
              if self.iteration % 12 == 0: # Approx 1 min (assuming 5s check interval)
